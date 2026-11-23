@@ -1,14 +1,14 @@
 {
   "id": "/rugby-intelligence-engine/",
-  "name": "Rugby Intelligence Pro — Argentina & Mundial",
+  "name": "Rugby Pro — Argentina, URBA & Mundial",
   "short_name": "Rugby Pro",
-  "description": "Campeonatos de Argentina (URBA Top 14, Primera A), Los Pumas XV y 7s, Nations Championship, Seis Naciones, Rugby Championship, Mundiales, SVNS Seven y Top 14 con planteles, coaches, estadios y escudos oficiales.",
+  "description": "Todo el rugby en una app: Los Pumas XV y 7s, todos los campeonatos y 99 clubes de Buenos Aires (URBA Top 14 a Desarrollo), Top 14 Francia, Naciones, Mundiales, Seven SVNS, noticias y planteles oficiales.",
   "start_url": "/rugby-intelligence-engine/",
   "scope": "/rugby-intelligence-engine/",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "background_color": "#060b09",
-  "theme_color": "#060b09",
+  "background_color": "#06080d",
+  "theme_color": "#06080d",
   "lang": "es-AR",
   "icons": [
     {

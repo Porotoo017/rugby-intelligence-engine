@@ -17,6 +17,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -33,8 +34,8 @@ UTC_TZ = dt.timezone.utc
 USER_AGENT = "RugbyIntelligencePro/1.0 (+https://github.com/Porotoo017/rugby-intelligence-engine)"
 
 ESPN_LEAGUES = [
-    {"id": "289279", "name": "URBA Top 14", "group": "arg", "short": "URBA Top 14"},
-    {"id": "2009", "name": "URBA Primera A", "group": "arg", "short": "URBA 1ª A"},
+    {"id": "289279", "name": "URBA Top 14", "group": "urba", "short": "URBA Top 14"},
+    {"id": "2009", "name": "URBA Primera A", "group": "urba", "short": "URBA 1ª A"},
     {"id": "17567", "name": "Nations Championship", "group": "nations", "short": "Nations Champ"},
     {"id": "244293", "name": "The Rugby Championship", "group": "nations", "short": "Rugby Champ"},
     {"id": "180659", "name": "Six Nations", "group": "nations", "short": "6 Naciones"},
@@ -46,7 +47,7 @@ ESPN_LEAGUES = [
     {"id": "283", "name": "Olympic Women's 7s", "group": "sevens", "short": "Seven Fem"},
     {"id": "271937", "name": "European Champions Cup", "group": "clubs", "short": "Champions Cup"},
     {"id": "272073", "name": "European Challenge Cup", "group": "clubs", "short": "Challenge Cup"},
-    {"id": "270559", "name": "French Top 14", "group": "clubs", "short": "Top 14"},
+    {"id": "270559", "name": "French Top 14", "group": "top14", "short": "Top 14"},
     {"id": "270557", "name": "United Rugby Championship", "group": "clubs", "short": "URC"},
     {"id": "267979", "name": "Gallagher Premiership", "group": "clubs", "short": "Premiership"},
     {"id": "242041", "name": "Super Rugby Pacific", "group": "clubs", "short": "Super Rugby"},
@@ -90,20 +91,30 @@ WIKI_PAGE_MAP = {
     "toulouse": "Stade_Toulousain",
     "union bordeaux-begles": "Union_Bordeaux_Bègles",
     "bordeaux": "Union_Bordeaux_Bègles",
+    "bordeaux begles": "Union_Bordeaux_Bègles",
     "stade rochelais": "Stade_Rochelais",
     "la rochelle": "Stade_Rochelais",
     "racing 92": "Racing_92",
     "stade francais paris": "Stade_Français",
+    "stade francais": "Stade_Français",
     "rc toulon": "RC_Toulon",
     "toulon": "RC_Toulon",
     "section paloise": "Section_Paloise",
+    "pau": "Section_Paloise",
     "aviron bayonnais": "Aviron_Bayonnais",
+    "bayonne": "Aviron_Bayonnais",
     "montpellier herault rugby club": "Montpellier_Hérault_Rugby",
+    "montpellier herault": "Montpellier_Hérault_Rugby",
     "castres olympique": "Castres_Olympique",
     "lyon olympique universitaire": "Lyon_OU",
+    "lyon": "Lyon_OU",
     "asm clermont auvergne": "ASM_Clermont_Auvergne",
+    "clermont auvergne": "ASM_Clermont_Auvergne",
     "usa perpignan": "USA_Perpignan",
+    "perpignan": "USA_Perpignan",
     "rc vannes": "RC_Vannes",
+    "vannes": "RC_Vannes",
+    "montauban": "US_Montauban",
     "leinster": "Leinster_Rugby",
     "munster": "Munster_Rugby",
     "ulster": "Ulster_Rugby",
@@ -307,7 +318,8 @@ def parse_wiki_coach_and_crest(wiki_title: str) -> tuple[str | None, str | None,
             if not val:
                 continue
             if not coach and any(x in k for x in ("coach", "head coach", "director of rugby", "entrenador")):
-                coach = val[:90]
+                if "some say" in val.lower(): val = val.split("Some say")[0].strip()
+                coach = val[:60]
             if not stadium and any(x in k for x in ("ground", "stadium", "home ground", "estadio")):
                 stadium = val[:100]
     return coach, crest, stadium
@@ -338,7 +350,11 @@ def harvest_espn_teams(conn: sqlite3.Connection) -> dict[str, dict]:
                 if not name:
                     continue
                 logos = tm.get("logos") or []
-                crest = clean_url(logos[0].get("href")) if logos else (f"https://a.espncdn.com/i/teamlogos/rugby/teams/500/{tid}.png" if tid else "")
+                crest = clean_url(logos[0].get("href")) if logos else ""
+                if not crest and tid and tid not in ("25912", "25920"):
+                    crest = f"https://a.espncdn.com/i/teamlogos/rugby/teams/500/{tid}.png"
+                if "countries/500/usa" in crest and "usa" not in name.lower():
+                    crest = ""
                 nk = norm_key(name)
                 entry = {
                     "key": nk,
@@ -405,7 +421,7 @@ def enrich_team_meta_from_wiki(conn: sqlite3.Connection, team_names: list[str], 
                     team_index[nk]["crestUrl"] = row[0]
             continue
 
-        if lookups >= 30:
+        if lookups >= 50:
             if row:
                 team_index.setdefault(nk, {"key": nk, "name": raw_name})
                 if row[1]:
@@ -420,13 +436,17 @@ def enrich_team_meta_from_wiki(conn: sqlite3.Connection, team_names: list[str], 
         lookups += 1
         now_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         existing_crest = (team_index.get(nk) or {}).get("crestUrl") or (team_index.get(base_nk) or {}).get("crestUrl") or (row[0] if row else "")
+        if "countries/500/usa" in existing_crest and "usa" not in nk:
+            existing_crest = ""
+        if nk in ("bayonne", "perpignan") and w_crest:
+            existing_crest = w_crest
         final_crest = existing_crest or w_crest or ""
 
         conn.execute(
             """INSERT INTO team_meta(team_key, display_name, espn_id, crest_url, coach, stadium, country, wiki_title, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(team_key) DO UPDATE SET
-                 crest_url=CASE WHEN team_meta.crest_url='' THEN excluded.crest_url ELSE team_meta.crest_url END,
+                 crest_url=CASE WHEN excluded.crest_url != '' AND (team_meta.crest_url='' OR team_meta.crest_url LIKE '%countries/500/usa%' OR team_meta.crest_url LIKE '%25912.png') THEN excluded.crest_url ELSE team_meta.crest_url END,
                  coach=CASE WHEN excluded.coach != '' THEN excluded.coach ELSE team_meta.coach END,
                  stadium=CASE WHEN excluded.stadium != '' THEN excluded.stadium ELSE team_meta.stadium END,
                  wiki_title=excluded.wiki_title,
@@ -461,7 +481,11 @@ def classify_group(league_name: str, sport: str = "") -> str:
         return "sevens"
     if any(k in low for k in ("world cup", "mundial")):
         return "worldcup"
-    if any(k in low for k in ("urba", "nacional de clubes", "super rugby americas")):
+    if "top 14" in low and "urba" not in low:
+        return "top14"
+    if any(k in low for k in ("urba", "buenos aires")):
+        return "urba"
+    if any(k in low for k in ("nacional de clubes", "super rugby americas", "súper rugby américas")):
         return "arg"
     if any(k in low for k in ("nations", "six nations", "rugby championship", "international", "lions tour", "pacific nations", "bledisloe", "wxv", "rugby europe")):
         return "nations"
@@ -480,7 +504,8 @@ def parse_espn_matches(now_utc: dt.datetime) -> list[dict]:
         date_queries = []
         for raw_d in cal:
             cdt = parse_iso_dt(raw_d)
-            if cdt and (now_utc - dt.timedelta(days=10)) <= cdt <= (now_utc + dt.timedelta(days=35)):
+            past_win = 28 if lg["id"] == "270559" else 10
+            if cdt and (now_utc - dt.timedelta(days=past_win)) <= cdt <= (now_utc + dt.timedelta(days=35)):
                 d_str = cdt.strftime("%Y%m%d")
                 if d_str not in date_queries:
                     date_queries.append(d_str)
@@ -556,7 +581,7 @@ def parse_espn_matches(now_utc: dt.datetime) -> list[dict]:
                         "name": h_name,
                         "abbr": h_tm.get("abbreviation") or "",
                         "espnId": str(h_tm.get("id") or ""),
-                        "crestUrl": clean_url(h_tm.get("logo") or (f"https://a.espncdn.com/i/teamlogos/rugby/teams/500/{h_tm.get('id')}.png" if h_tm.get("id") else "")),
+                        "crestUrl": ("" if (("perpignan" in h_name.lower() and "countries/500/usa" in str(h_tm.get("logo") or "")) or str(h_tm.get("id") or "") in ("25912", "25920")) else clean_url(h_tm.get("logo") or (f"https://a.espncdn.com/i/teamlogos/rugby/teams/500/{h_tm.get('id')}.png" if h_tm.get("id") else ""))),
                         "score": home.get("score") if status != "scheduled" else None,
                         "lineup": [],
                         "coach": "",
@@ -565,7 +590,7 @@ def parse_espn_matches(now_utc: dt.datetime) -> list[dict]:
                         "name": a_name,
                         "abbr": a_tm.get("abbreviation") or "",
                         "espnId": str(a_tm.get("id") or ""),
-                        "crestUrl": clean_url(a_tm.get("logo") or (f"https://a.espncdn.com/i/teamlogos/rugby/teams/500/{a_tm.get('id')}.png" if a_tm.get("id") else "")),
+                        "crestUrl": ("" if (("perpignan" in a_name.lower() and "countries/500/usa" in str(a_tm.get("logo") or "")) or str(a_tm.get("id") or "") in ("25912", "25920")) else clean_url(a_tm.get("logo") or (f"https://a.espncdn.com/i/teamlogos/rugby/teams/500/{a_tm.get('id')}.png" if a_tm.get("id") else ""))),
                         "score": away.get("score") if status != "scheduled" else None,
                         "lineup": [],
                         "coach": "",
@@ -708,10 +733,11 @@ def enrich_match_details(matches: list[dict], conn: sqlite3.Connection) -> None:
     live_m = [m for m in matches if m["status"] == "live"]
     fin_m = [m for m in matches if m["status"] == "finished"]
     fin_m.sort(key=lambda m: (0 if m.get("isArgentina") else 1, -(m.get("ts") or 0)))
+    fin_top14 = [m for m in fin_m if m["group"] == "top14"]
     up_arg_nat = [m for m in matches if m["status"] == "scheduled" and (m.get("isArgentina") or m["group"] in ("nations", "worldcup", "arg"))]
     priority_seen = set()
     priority = []
-    for m in (live_m + fin_m[:55] + up_arg_nat[:30]):
+    for m in (live_m + fin_m[:55] + fin_top14 + up_arg_nat[:30]):
         if m["id"] not in priority_seen:
             priority_seen.add(m["id"])
             priority.append(m)
@@ -886,7 +912,7 @@ def apply_team_meta_and_log(matches: list[dict], conn: sqlite3.Connection, ranki
             nk = norm_key(tm["name"])
             base_nk = re.sub(r"\s+7s$", "", nk)
             info = meta_map.get(nk) or meta_map.get(base_nk) or {}
-            if not tm.get("crestUrl") and info.get("crestUrl"):
+            if (not tm.get("crestUrl") or ("countries/500/usa" in str(tm.get("crestUrl")) and "usa" not in nk) or "25912.png" in str(tm.get("crestUrl"))) and info.get("crestUrl") and not ("countries/500/usa" in info["crestUrl"] and "usa" not in nk):
                 tm["crestUrl"] = info["crestUrl"]
             if not tm.get("coach") and info.get("coach"):
                 tm["coach"] = info["coach"]
@@ -930,20 +956,37 @@ def apply_team_meta_and_log(matches: list[dict], conn: sqlite3.Connection, ranki
             )
     conn.commit()
 
+    team_groups: dict[str, set] = {}
+    team_leagues: dict[str, set] = {}
+    for m in matches:
+        grp = m.get("group") or ""
+        lg_short = m.get("leagueShort") or m.get("leagueName") or ""
+        for side in ("home", "away"):
+            tnk = norm_key(m[side]["name"])
+            if grp:
+                team_groups.setdefault(tnk, set()).add(grp)
+            if lg_short:
+                team_leagues.setdefault(tnk, set()).add(lg_short)
+
     directory = []
     seen = set()
     for nk, info in meta_map.items():
-        if nk in seen or not info.get("crestUrl"):
+        cu = info.get("crestUrl") or ""
+        if nk in seen or not cu or ("countries/500/usa" in cu and "usa" not in nk) or "25912.png" in cu:
             continue
         seen.add(nk)
         r_info = roster_map.get(nk)
+        grps = sorted(team_groups.get(nk, set()))
+        lgs = sorted(team_leagues.get(nk, set()))
         directory.append({
             "key": nk,
             "name": info["name"],
-            "crestUrl": info["crestUrl"],
+            "crestUrl": cu,
             "coach": info.get("coach") or "",
             "stadium": info.get("stadium") or "",
             "worldRank": rk_men_map.get(nk),
+            "groups": grps,
+            "leagues": lgs,
             "roster": r_info["lineup"] if r_info else [],
             "rosterUpdated": r_info["eventDate"][:10] if r_info else "",
             "isArgentina": ("argentina" in nk or nk in ("newman", "hindu", "sic", "casi", "belgrano ac", "cuba", "alumni", "regatas bella vista", "b.a.c.r.c.", "san luis", "champagnat", "club atletico del rosario")),
@@ -952,16 +995,403 @@ def apply_team_meta_and_log(matches: list[dict], conn: sqlite3.Connection, ranki
     return directory, new_logged
 
 
+
+URBA_CHAMPIONSHIPS = [
+    {"id": 2025176, "name": "URBA Top 14 — Superior", "short": "Top 14"},
+    {"id": 2025177, "name": "URBA Primera A — Superior", "short": "Primera A"},
+    {"id": 2025178, "name": "URBA Primera B — Superior", "short": "Primera B"},
+    {"id": 2025179, "name": "URBA Primera C — Superior", "short": "Primera C"},
+    {"id": 2025180, "name": "URBA Segunda — Superior", "short": "Segunda"},
+    {"id": 2025181, "name": "URBA Tercera — Superior", "short": "Tercera"},
+    {"id": 2025182, "name": "URBA Desarrollo — Superior", "short": "Desarrollo"},
+    {"id": 2025208, "name": "URBA Femenino — Top 9", "short": "Femenino"},
+]
+
+
+def fetch_text(url: str, timeout: int = 12) -> str:
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def strip_html(raw: str) -> str:
+    txt = html.unescape(re.sub(r"<[^>]+>", " ", raw or ""))
+    return re.sub(r"\s+", " ", txt).strip()
+
+
+def fetch_wiki_urba_venues() -> dict[str, dict]:
+    venues: dict[str, dict] = {}
+    d = fetch_json(
+        "https://es.wikipedia.org/w/api.php?action=parse&page=Uni%C3%B3n_de_Rugby_de_Buenos_Aires&prop=wikitext&format=json",
+        timeout=12,
+    )
+    wt = ((d or {}).get("parse") or {}).get("wikitext", {}).get("*", "") if isinstance(d, dict) else ""
+    if not wt:
+        return venues
+    def clean_cell(c: str) -> str:
+        c = re.sub(r"\[\[([^|\]]+\|)?([^\]]+)\]\]", r"\2", c)
+        c = re.sub(r"\{\{[^}]*\}\}", "", c)
+        c = re.sub(r"<[^>]+>", "", c)
+        return re.sub(r"\s+", " ", c).strip(" |.")
+    for line in wt.splitlines():
+        if line.startswith("||") or (line.startswith("|[[") and "||" in line):
+            parts = [clean_cell(p) for p in line.lstrip("|").split("||")]
+            if len(parts) >= 4 and parts[0]:
+                cname = parts[0]
+                sede = parts[2]
+                cancha = parts[3]
+                nk = norm_key(cname)
+                venues[nk] = {"sede": sede, "cancha": cancha, "jurisdiccion": parts[1]}
+                # Also index simplified aliases (e.g. without Club / Rugby Club / Asociación)
+                short = re.sub(r"\b(club|atletico|asociacion|rugby|hockey|de)\b", " ", nk)
+                short = re.sub(r"\s+", " ", short).strip()
+                if short and short not in venues:
+                    venues[short] = venues[nk]
+    return venues
+
+
+def urba_crest(img_uri: str | None) -> str:
+    if not img_uri:
+        return ""
+    if img_uri.startswith("http"):
+        return clean_url(img_uri)
+    return "https://urbaimagenes-cddyfadwc8dqcchn.z03.azurefd.net/" + img_uri.lstrip("/")
+
+
+def fetch_urba_official_data(conn: sqlite3.Connection) -> tuple[dict, list[dict]]:
+    filters = fetch_json("https://urba.org.ar/api/fixture/filters", timeout=12) or {}
+    wiki_venues = fetch_wiki_urba_venues()
+    clubs_raw = filters.get("clubs") or []
+    clubs_map: dict[int, dict] = {}
+    for c in clubs_raw:
+        cid = int(c.get("id") or 0)
+        name = str(c.get("name") or "").strip()
+        if not cid or not name:
+            continue
+        crest = clean_url(c.get("image_uri_with_base_url") or urba_crest(c.get("image_uri")))
+        nk = norm_key(name)
+        URBA_ALIASES = {
+            "casi": "club atletico de san isidro",
+            "sic": "san isidro club",
+            "cuba": "club universitario de buenos aires (cuba)",
+            "b a c r c": "buenos aires cricket & rugby club",
+            "bacrc": "buenos aires cricket & rugby club",
+            "geba": "club de gimnasia y esgrima de buenos aires",
+            "daom": "daom",
+            "sitas": "societa italiana di tiro a segno",
+            "atletico del rosario": "club atletico del rosario",
+            "regatas bella vista": "club de regatas bella vista",
+            "newman": "club newman",
+            "hindu": "hindu club",
+            "belgrano athletic": "belgrano athletic club",
+            "la plata": "la plata rugby club",
+            "pucara": "club pucara",
+            "los tilos": "club de rugby los tilos",
+            "san luis": "club san luis",
+            "champagnat": "club champagnat",
+            "lomas athletic": "lomas athletic club",
+            "san albano": "asociacion ex alumnos del colegio san albano",
+            "hurling": "hurling club",
+            "pueyrredon": "club pueyrredon",
+            "san martin": "club san martin",
+            "olivos": "olivos rugby club",
+            "curupayti": "curupayti club de rugby",
+            "san cirano": "club san cirano",
+            "manuel belgrano": "club manuel belgrano",
+            "mariano moreno": "asociacion cultural y deportiva mariano moreno",
+            "san andres": "club san andres",
+            "st brendan's": "st. brendan's",
+            "banco nacion": "club banco nacion",
+            "universitario la plata": "club universitario de la plata",
+            "deportiva francesa": "asociacion deportiva francesa",
+            "delta": "delta rugby club",
+            "don bosco": "don bosco rugby",
+            "argentino": "club argentino de rugby",
+            "los matreres": "los matreros",
+            "los matreros": "los matreros",
+            "monte grande": "monte grande rugby club",
+            "san fernando": "club san fernando",
+            "san patricio": "club san patricio",
+            "casa de padua": "casa de padua",
+            "el retiro": "club el retiro",
+            "albatros": "club albatros",
+            "lanus": "lanus rugby club",
+            "liceo militar": "liceo militar",
+            "vicente lopez": "municipalidad de vicente lopez",
+            "tigre": "tigre rugby club",
+            "ciudad de buenos aires": "club ciudad de buenos aires",
+            "san carlos": "club san carlos",
+            "varela jr": "varela junior",
+            "zarate": "arsenal zarate rugby",
+        }
+        alias_k = URBA_ALIASES.get(nk.replace(".", " ").strip(), "") or URBA_ALIASES.get(nk, "")
+        v_info = wiki_venues.get(nk) or (wiki_venues.get(alias_k) if alias_k else None)
+        if not v_info:
+            short = re.sub(r"\b(club|atletico|asociacion|rugby|hockey|de|c s c y d)\b", " ", nk)
+            short = re.sub(r"\s+", " ", short).strip()
+            for wk, wv in wiki_venues.items():
+                if (alias_k and alias_k in wk) or (short and len(short) >= 4 and (short in wk or wk in short)):
+                    v_info = wv
+                    break
+        clubs_map[cid] = {
+            "id": cid,
+            "key": nk,
+            "name": name,
+            "crestUrl": crest,
+            "division": "URBA",
+            "standingsPos": None,
+            "pts": None,
+            "played": 0,
+            "won": 0,
+            "lost": 0,
+            "sede": (v_info or {}).get("sede") or "",
+            "cancha": (v_info or {}).get("cancha") or "",
+        }
+
+    def fetch_champ(cfg):
+        return cfg, fetch_json(f"https://urba.org.ar/api/fixture/championship/{cfg['id']}", timeout=14)
+
+    championships_out: list[dict] = []
+    urba_feed_matches: list[dict] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+        for cfg, data in ex.map(fetch_champ, URBA_CHAMPIONSHIPS):
+            if not isinstance(data, dict):
+                continue
+            champ_obj = data.get("championship") or {}
+            standings_raw = data.get("standings") or []
+            standings_out: list[dict] = []
+            for st in standings_raw:
+                tm = st.get("team") or {}
+                cl = tm.get("club") or {}
+                club_id = int(tm.get("club_id") or cl.get("id") or 0)
+                cname = str(cl.get("name") or tm.get("name") or "").strip()
+                crest = urba_crest(cl.get("image_uri_with_base_url") or cl.get("image_uri")) or (clubs_map.get(club_id, {}).get("crestUrl") or "")
+                row = {
+                    "pos": int(st.get("position") or len(standings_out) + 1),
+                    "clubId": club_id,
+                    "name": cname,
+                    "crestUrl": crest,
+                    "played": int(st.get("played") or 0),
+                    "won": int(st.get("won") or 0),
+                    "tied": int(st.get("tied") or 0),
+                    "lost": int(st.get("lost") or 0),
+                    "pf": int(st.get("points_favor") or 0),
+                    "pc": int(st.get("points_against") or 0),
+                    "bonus": int(st.get("bonus_offensive") or 0) + int(st.get("bonus_defensive") or 0),
+                    "pts": int(st.get("points_total") or 0),
+                }
+                standings_out.append(row)
+                if club_id in clubs_map and cfg["short"] != "Femenino":
+                    clubs_map[club_id]["division"] = cfg["short"]
+                    clubs_map[club_id]["standingsPos"] = row["pos"]
+                    clubs_map[club_id]["pts"] = row["pts"]
+                    clubs_map[club_id]["played"] = row["played"]
+                    clubs_map[club_id]["won"] = row["won"]
+                    clubs_map[club_id]["lost"] = row["lost"]
+                    if not clubs_map[club_id]["crestUrl"] and crest:
+                        clubs_map[club_id]["crestUrl"] = crest
+
+            rounds = champ_obj.get("rounds") or []
+            recent_rounds = rounds[-3:] if len(rounds) > 3 else rounds
+            champ_recent_matches: list[dict] = []
+            for rd in reversed(recent_rounds):
+                rname = str(rd.get("name") or "").strip()
+                pdate = parse_iso_dt(rd.get("playdate"))
+                times = format_arg_times(pdate)
+                for m in rd.get("matches") or []:
+                    lt = m.get("local_team") or {}
+                    vt = m.get("visit_team") or {}
+                    lc = lt.get("club") or {}
+                    vc = vt.get("club") or {}
+                    lid = int(lt.get("club_id") or lc.get("id") or 0)
+                    vid = int(vt.get("club_id") or vc.get("id") or 0)
+                    h_name = str(lt.get("name") or lc.get("name") or "Local").strip()
+                    a_name = str(vt.get("name") or vc.get("name") or "Visitante").strip()
+                    h_crest = urba_crest(lc.get("image_uri_with_base_url") or lc.get("image_uri")) or (clubs_map.get(lid, {}).get("crestUrl") or "")
+                    a_crest = urba_crest(vc.get("image_uri_with_base_url") or vc.get("image_uri")) or (clubs_map.get(vid, {}).get("crestUrl") or "")
+                    fulfilled = bool(m.get("fulfilled"))
+                    suspended = bool(m.get("suspended"))
+                    status = "finished" if fulfilled else "scheduled"
+                    h_sc = m.get("local_team_score") if fulfilled else None
+                    a_sc = m.get("visit_team_score") if fulfilled else None
+                    cancha = (clubs_map.get(lid) or {}).get("cancha") or (clubs_map.get(lid) or {}).get("sede") or "Buenos Aires"
+                    m_obj = {
+                        "id": f"urba:{cfg['id']}:{m.get('id')}",
+                        "source": "urba",
+                        "eventId": str(m.get("id") or ""),
+                        "leagueId": str(cfg["id"]),
+                        "leagueName": cfg["name"],
+                        "leagueShort": f"URBA {cfg['short']}",
+                        "phase": rname,
+                        "group": "urba",
+                        "status": status,
+                        "statusText": "Suspendido" if suspended else ("Finalizado" if fulfilled else "Programado"),
+                        "isArgentina": True,
+                        "venue": {"name": cancha, "city": "Buenos Aires", "country": "Argentina"},
+                        "odds": None,
+                        **times,
+                        "home": {"name": h_name, "abbr": h_name[:3].upper(), "crestUrl": h_crest, "score": h_sc, "lineup": [], "coach": ""},
+                        "away": {"name": a_name, "abbr": a_name[:3].upper(), "crestUrl": a_crest, "score": a_sc, "lineup": [], "coach": ""},
+                        "scoring": [],
+                        "cards": [],
+                        "officials": [],
+                    }
+                    champ_recent_matches.append(m_obj)
+                    if rd == recent_rounds[-1] or (cfg["short"] == "Top 14" and rname.upper() == "PLAYOFF"):
+                        urba_feed_matches.append(m_obj)
+
+            championships_out.append({
+                "id": cfg["id"],
+                "name": cfg["name"],
+                "short": cfg["short"],
+                "standings": standings_out,
+                "recentMatches": champ_recent_matches[:16],
+                "totalRounds": len(rounds),
+            })
+
+    now_iso = dt.datetime.now(UTC_TZ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    clubs_list = sorted(clubs_map.values(), key=lambda c: (
+        {"Top 14": 0, "Primera A": 1, "Primera B": 2, "Primera C": 3, "Segunda": 4, "Tercera": 5, "Desarrollo": 6}.get(c["division"], 9),
+        c["standingsPos"] or 99,
+        c["name"].lower(),
+    ))
+    for c in clubs_list:
+        nk = c["key"]
+        existing = conn.execute("SELECT coach, stadium, wiki_title FROM team_meta WHERE team_key=?", (nk,)).fetchone()
+        stad = c["cancha"] or c["sede"] or (existing[1] if existing else "")
+        conn.execute(
+            """INSERT INTO team_meta(team_key, display_name, espn_id, crest_url, coach, stadium, country, wiki_title, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(team_key) DO UPDATE SET
+                 crest_url=CASE WHEN excluded.crest_url != '' THEN excluded.crest_url ELSE team_meta.crest_url END,
+                 stadium=CASE WHEN excluded.stadium != '' THEN excluded.stadium ELSE team_meta.stadium END,
+                 country='Argentina',
+                 updated_at=excluded.updated_at""",
+            (nk, c["name"], "", c["crestUrl"], existing[0] if existing else "", stad, "Argentina", existing[2] if existing else "", now_iso),
+        )
+    conn.commit()
+    return {"championships": championships_out, "clubs": clubs_list, "totalClubs": len(clubs_list)}, urba_feed_matches
+
+
+def fetch_rugby_news() -> list[dict]:
+    items: list[dict] = []
+
+    def from_wp(url: str, source: str, category: str):
+        posts = fetch_json(url, timeout=12)
+        if not isinstance(posts, list):
+            return []
+        out = []
+        for p in posts:
+            title = strip_html((p.get("title") or {}).get("rendered") or "")
+            summary = strip_html((p.get("excerpt") or {}).get("rendered") or "")
+            if len(summary) > 190:
+                summary = summary[:187].rstrip() + "..."
+            link = str(p.get("link") or "")
+            media = (p.get("_embedded") or {}).get("wp:featuredmedia") or []
+            img = ""
+            if media and isinstance(media[0], dict):
+                img = clean_url(media[0].get("source_url") or "")
+            pdt = parse_iso_dt(p.get("date_gmt") or p.get("date"))
+            times = format_arg_times(pdt)
+            if title and link:
+                out.append({
+                    "id": f"{source}:{p.get('id')}",
+                    "title": title,
+                    "summary": summary,
+                    "url": link,
+                    "imageUrl": img,
+                    "source": source,
+                    "category": category,
+                    "dateArg": times["dateArg"],
+                    "ts": times["ts"],
+                })
+        return out
+
+    def from_rss(url: str, source: str, category: str, limit: int = 12):
+        raw = fetch_text(url, timeout=12)
+        if not raw or "<rss" not in raw:
+            return []
+        out = []
+        try:
+            root = ET.fromstring(raw)
+            for idx, it in enumerate(root.findall(".//item")[:limit]):
+                title = strip_html(it.findtext("title") or "")
+                summary = strip_html(it.findtext("description") or "")
+                if len(summary) > 190:
+                    summary = summary[:187].rstrip() + "..."
+                link = str(it.findtext("link") or "").strip()
+                pub = str(it.findtext("pubDate") or "").strip()
+                pdt = None
+                if pub:
+                    try:
+                        from email.utils import parsedate_to_datetime
+                        pdt = parsedate_to_datetime(pub).astimezone(UTC_TZ)
+                    except Exception:
+                        pdt = None
+                times = format_arg_times(pdt)
+                img = ""
+                for child in list(it):
+                    tag = child.tag.split("}")[-1].lower()
+                    if tag in ("thumbnail", "content", "enclosure") and child.attrib.get("url"):
+                        img = clean_url(child.attrib.get("url"))
+                        break
+                if title and link:
+                    out.append({
+                        "id": f"{source}:{idx}:{times['ts']}",
+                        "title": title,
+                        "summary": summary,
+                        "url": link,
+                        "imageUrl": img,
+                        "source": source,
+                        "category": category,
+                        "dateArg": times["dateArg"],
+                        "ts": times["ts"],
+                    })
+        except Exception:
+            pass
+        return out
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
+        futs = [
+            ex.submit(from_wp, "https://uar.com.ar/wp-json/wp/v2/posts?per_page=10&_embed", "UAR Oficial", "pumas"),
+            ex.submit(from_wp, "https://urba.org.ar/wp-json/wp/v2/posts?per_page=10&_embed", "URBA Oficial", "urba"),
+            ex.submit(from_rss, "https://www.cordobaxv.com.ar/feed/", "Córdoba XV", "pumas", 10),
+            ex.submit(from_rss, "https://feeds.bbci.co.uk/sport/rugby-union/rss.xml", "BBC Rugby", "internacional", 12),
+        ]
+        for f in concurrent.futures.as_completed(futs):
+            try:
+                items.extend(f.result())
+            except Exception:
+                pass
+
+    seen = set()
+    deduped = []
+    for it in sorted(items, key=lambda x: x["ts"], reverse=True):
+        k = norm_key(it["title"])[:60]
+        if k not in seen:
+            seen.add(k)
+            deduped.append(it)
+    return deduped[:36]
+
 def main() -> None:
     now_utc = dt.datetime.now(UTC_TZ)
     conn = init_db()
-
     team_index = harvest_espn_teams(conn)
+    urba_data, urba_feed_matches = fetch_urba_official_data(conn)
+    news_items = fetch_rugby_news()
     espn_matches = parse_espn_matches(now_utc)
     wr_matches = parse_world_rugby_matches(now_utc)
     matches = merge_and_dedupe(espn_matches, wr_matches)
-
     enrich_match_details(matches, conn)
+    # Append latest official URBA matches (avoid duplicating ESPN URBA Top 14 final)
+    existing_keys = {(norm_key(m["home"]["name"]), norm_key(m["away"]["name"]), m["dayArg"]) for m in matches}
+    for um in urba_feed_matches:
+        uk = (norm_key(um["home"]["name"]), norm_key(um["away"]["name"]), um["dayArg"])
+        if uk not in existing_keys:
+            matches.append(um)
 
     names_to_enrich = list(WIKI_PAGE_MAP.keys())
     for m in matches:
@@ -1013,8 +1443,37 @@ def main() -> None:
     total_history = conn.execute("SELECT COUNT(*) FROM match_history").fetchone()[0]
     total_rosters = conn.execute("SELECT COUNT(*) FROM team_rosters").fetchone()[0]
 
+    pumas_xv_roster = []
+    for m in matches:
+        if m.get("group") != "sevens" and m.get("status") == "finished":
+            for side in ("home", "away"):
+                if norm_key(m[side]["name"]) == "argentina" and m[side].get("lineup"):
+                    pumas_xv_roster = m[side]["lineup"]
+                    break
+            if pumas_xv_roster:
+                break
+    if not pumas_xv_roster:
+        arg_dir = next((t for t in teams_dir if t["key"] == "argentina"), None)
+        if arg_dir:
+            pumas_xv_roster = arg_dir.get("roster") or []
+
+    arg_tournaments = [
+        {"name": "Nations Championship 2026", "team": "Los Pumas XV", "status": "Final 7° puesto vs Escocia · Dom 29 Nov 10:10 ART", "coach": "Felipe Contepomi"},
+        {"name": "HSBC SVNS 2027 — Dubai", "team": "Los Pumas 7s", "status": "Pool A vs Sudáfrica, USA y Australia · 28 Nov", "coach": "Santiago Gómez Cora"},
+        {"name": "URBA Top 14 2026", "team": "Clubes Buenos Aires", "status": "Bicampeón: Newman (venció a Hindú en la Final)", "coach": "99 clubes afiliados"},
+        {"name": "Nacional de Clubes 2026", "team": "Campeones del Interior & URBA", "status": "Campeón 2026: Tala RC", "coach": "UAR Oficial"},
+        {"name": "Súper Rugby Américas", "team": "Pampas · Dogos XV · Tarucas", "status": "Franquicias profesionales argentinas", "coach": "Sudamérica Rugby"},
+    ]
+
     payload = {
-        "engineVersion": "1.0.0-RUGBY-PRO",
+        "engineVersion": "2.0.0-RUGBY-PRO-MAX",
+        "urba": urba_data,
+        "news": news_items,
+        "argentinaHub": {
+            "xvRoster": pumas_xv_roster,
+            "tournaments": arg_tournaments,
+            "coaches": {"xv": "Felipe Contepomi", "sevens": "Santiago Gómez Cora"},
+        },
         "generatedAt": now_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "generatedAtArg": format_arg_times(now_utc)["dateArg"],
         "totalMatches": len(matches),
