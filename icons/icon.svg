@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="45%" r="65%">
+      <stop offset="0%" stop-color="#0d261d"/>
+      <stop offset="100%" stop-color="#040806"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f7dca0"/>
+      <stop offset="50%" stop-color="#d4a64a"/>
+      <stop offset="100%" stop-color="#966c21"/>
+    </linearGradient>
+    <linearGradient id="ball" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="70%" stop-color="#e5e9e7"/>
+      <stop offset="100%" stop-color="#b8c4be"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect x="134" y="88" width="16" height="292" rx="8" fill="url(#gold)"/>
+  <rect x="362" y="88" width="16" height="292" rx="8" fill="url(#gold)"/>
+  <rect x="134" y="252" width="244" height="16" rx="6" fill="url(#gold)"/>
+  <rect x="122" y="318" width="40" height="72" rx="8" fill="#10b981" stroke="url(#gold)" stroke-width="3"/>
+  <rect x="350" y="318" width="40" height="72" rx="8" fill="#10b981" stroke="url(#gold)" stroke-width="3"/>
+  <ellipse cx="256" cy="264" rx="76" ry="120" fill="url(#ball)" stroke="url(#gold)" stroke-width="6"/>
+  <path d="M256 146 V382" stroke="#13201b" stroke-width="2.5" opacity="0.65"/>
+  <path d="M222 178 Q256 264 222 350 M290 178 Q256 264 290 350" fill="none" stroke="url(#gold)" stroke-width="4" stroke-linecap="round"/>
+  <g stroke="#d4a64a" stroke-width="5" stroke-linecap="round">
+    <line x1="238" y1="222" x2="274" y2="222"/>
+    <line x1="236" y1="242" x2="276" y2="242"/>
+    <line x1="236" y1="262" x2="276" y2="262"/>
+    <line x1="236" y1="282" x2="276" y2="282"/>
+    <line x1="238" y1="302" x2="274" y2="302"/>
+  </g>
+</svg>

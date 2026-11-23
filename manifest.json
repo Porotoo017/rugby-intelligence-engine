@@ -1,0 +1,39 @@
+{
+  "id": "/rugby-intelligence-engine/",
+  "name": "Rugby Intelligence Pro — Argentina & Mundial",
+  "short_name": "Rugby Pro",
+  "description": "Campeonatos de Argentina (URBA Top 14, Primera A), Los Pumas XV y 7s, Nations Championship, Seis Naciones, Rugby Championship, Mundiales, SVNS Seven y Top 14 con planteles, coaches, estadios y escudos oficiales.",
+  "start_url": "/rugby-intelligence-engine/",
+  "scope": "/rugby-intelligence-engine/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#060b09",
+  "theme_color": "#060b09",
+  "lang": "es-AR",
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "./icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
