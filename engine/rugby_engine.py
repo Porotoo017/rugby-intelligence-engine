@@ -1305,54 +1305,176 @@ def fetch_urba_official_data(conn: sqlite3.Connection) -> tuple[dict, list[dict]
     return {"championships": championships_out, "clubs": clubs_list, "totalClubs": len(clubs_list)}, urba_feed_matches
 
 
+def _has_kw(text: str, words: tuple[str, ...]) -> bool:
+    pat = r"(?:^|\b)(?:" + "|".join(re.escape(w) for w in words) + r")(?:\b|$)"
+    return bool(re.search(pat, text))
+
+
+def classify_news_topic(title: str, summary: str, source: str, default_cat: str) -> tuple[str, str, list[str]]:
+    text = norm_key(f"{title} {summary}")
+    tags: list[str] = []
+
+    lineup_kw = (
+        "alineacion", "alineaciones", "formacion", "formaciones", "plantel", "convocados",
+        "convocatoria", "xv inicial", "baja", "bajas", "lesion", "lesiones", "lesionado",
+        "desgarro", "operado", "vuelve", "regresa", "titular", "titulares", "suplente",
+        "suplentes", "equipo confirmado", "capitan", "lineup", "line-up", "team news",
+        "starting xv", "squad", "squads", "recalled", "injury", "injured", "injuries",
+        "ruled out", "fit for", "dropped", "selection", "selected", "naming", "compo",
+        "compos", "groupe", "blesses", "blesse", "retour", "changes", "rotacion", "debutante"
+    )
+    transfer_kw = (
+        "fichaje", "fichajes", "ficha", "refuerzo", "refuerzos", "refuerza", "renueva",
+        "renovacion", "contrato", "contratos", "mercado", "se suma", "deja el club",
+        "dejara", "jugara en", "despedida", "transfer", "transfers", "transfert",
+        "transferts", "mercato", "signs", "signed", "signing", "signings", "contract",
+        "extension", "prolongation", "joins", "re-signs", "move to", "departure",
+        "exit", "retire", "retirement", "retiro"
+    )
+    pumas_kw = (
+        "los pumas", "pumas", "pumas 7s", "uar", "contepomi", "gomez cora", "argentina",
+        "pampas", "dogos xv", "dogos", "tarucas", "matera", "carreras", "chocobares",
+        "albornoz", "kremer", "montoya", "mallia", "moroni", "aleman", "delguy", "moneta",
+        "miotti"
+    )
+    urba_kw = (
+        "urba", "buenos aires", "newman", "hindu", "sic", "casi", "belgrano", "alumni",
+        "cuba", "la plata", "pucara", "los tilos", "regatas", "champagnat", "san luis",
+        "top 14 de la urba", "seven oficial de la urba"
+    )
+
+    is_lineup = _has_kw(text, lineup_kw)
+    is_transfer = _has_kw(text, transfer_kw)
+    is_pumas = default_cat == "pumas" or _has_kw(text, pumas_kw)
+    is_urba = default_cat == "urba" or _has_kw(text, urba_kw)
+
+    if is_lineup:
+        tags.append("alineaciones")
+    if is_transfer:
+        tags.append("fichajes")
+    if is_pumas:
+        tags.append("pumas")
+    if is_urba:
+        tags.append("urba")
+    if not tags or default_cat == "internacional":
+        if "internacional" not in tags:
+            tags.append("internacional")
+
+    if is_transfer:
+        return "fichajes", "Fichajes & Mercado", tags
+    if is_lineup:
+        return "alineaciones", "Alineaciones & Bajas", tags
+    if is_urba:
+        return "urba", "URBA Bs.As.", tags
+    if is_pumas:
+        return "pumas", "Los Pumas / UAR", tags
+    return "internacional", "Mundo Rugby", tags
+
+def normalize_news_img(url: str | None) -> str:
+    u = clean_url(url)
+    if not u:
+        return ""
+    if u.startswith("http://"):
+        u = "https://" + u[len("http://"):]
+    # Upgrade Planet Rugby / WP square thumbnails like -120x120.jpg to full image
+    u = re.sub(r"-\d{2,4}x\d{2,4}(?=\.(?:jpg|jpeg|png|webp)(?:\?|$))", "", u, flags=re.IGNORECASE)
+    return u
+
+
+def normalize_news_link(url: str | None) -> str:
+    u = str(url or "").strip()
+    if u.startswith("http://www.worldrugby.org"):
+        u = "https://www.world.rugby" + u[len("http://www.worldrugby.org"):]
+    elif u.startswith("http://worldrugby.org"):
+        u = "https://www.world.rugby" + u[len("http://worldrugby.org"):]
+    return u
+
+
 def fetch_rugby_news() -> list[dict]:
     items: list[dict] = []
 
-    def from_wp(url: str, source: str, category: str):
-        posts = fetch_json(url, timeout=12)
+    def build_item(nid: str, title: str, summary: str, link: str, img: str, source: str, default_cat: str, pdt: dt.datetime | None) -> dict | None:
+        title_c = strip_html(title)
+        link_c = normalize_news_link(link)
+        if not title_c or not link_c:
+            return None
+        sum_c = strip_html(summary)
+        if len(sum_c) > 210:
+            sum_c = sum_c[:207].rstrip() + "..."
+        times = format_arg_times(pdt)
+        topic, topic_label, tags = classify_news_topic(title_c, sum_c, source, default_cat)
+        return {
+            "id": nid,
+            "title": title_c,
+            "summary": sum_c,
+            "url": link_c,
+            "imageUrl": normalize_news_img(img),
+            "source": source,
+            "category": default_cat if default_cat in ("pumas", "urba") else topic,
+            "topic": topic,
+            "topicLabel": topic_label,
+            "tags": tags,
+            "dateArg": times["dateArg"],
+            "ts": times["ts"],
+        }
+
+    def from_wp(url: str, source: str, default_cat: str):
+        posts = fetch_json(url, timeout=14)
         if not isinstance(posts, list):
             return []
         out = []
         for p in posts:
-            title = strip_html((p.get("title") or {}).get("rendered") or "")
-            summary = strip_html((p.get("excerpt") or {}).get("rendered") or "")
-            if len(summary) > 190:
-                summary = summary[:187].rstrip() + "..."
-            link = str(p.get("link") or "")
             media = (p.get("_embedded") or {}).get("wp:featuredmedia") or []
             img = ""
             if media and isinstance(media[0], dict):
-                img = clean_url(media[0].get("source_url") or "")
+                img = media[0].get("source_url") or ""
             pdt = parse_iso_dt(p.get("date_gmt") or p.get("date"))
-            times = format_arg_times(pdt)
-            if title and link:
-                out.append({
-                    "id": f"{source}:{p.get('id')}",
-                    "title": title,
-                    "summary": summary,
-                    "url": link,
-                    "imageUrl": img,
-                    "source": source,
-                    "category": category,
-                    "dateArg": times["dateArg"],
-                    "ts": times["ts"],
-                })
+            it = build_item(
+                f"{source}:{p.get('id')}",
+                (p.get("title") or {}).get("rendered") or "",
+                (p.get("excerpt") or {}).get("rendered") or "",
+                p.get("link") or "",
+                img,
+                source,
+                default_cat,
+                pdt,
+            )
+            if it:
+                out.append(it)
         return out
 
-    def from_rss(url: str, source: str, category: str, limit: int = 12):
-        raw = fetch_text(url, timeout=12)
+    def from_world_rugby_es():
+        data = fetch_json("https://api.wr-rims-prod.pulselive.com/content/worldrugby/text/es/?pageSize=18", timeout=14)
+        if not isinstance(data, dict):
+            return []
+        out = []
+        for c in data.get("content") or []:
+            lm = c.get("leadMedia") or {}
+            img = c.get("imageUrl") or lm.get("imageUrl") or lm.get("url") or ""
+            pdt = parse_iso_dt(c.get("date") or c.get("publishFrom"))
+            it = build_item(
+                f"WorldRugbyES:{c.get('id')}",
+                c.get("title") or "",
+                c.get("summary") or c.get("description") or c.get("subtitle") or "",
+                c.get("canonicalUrl") or f"https://www.world.rugby/news/{c.get('id')}",
+                img,
+                "World Rugby ES",
+                "internacional",
+                pdt,
+            )
+            if it:
+                out.append(it)
+        return out
+
+    def from_rss(url: str, source: str, default_cat: str, limit: int = 16):
+        raw = fetch_text(url, timeout=14)
         if not raw or "<rss" not in raw:
             return []
         out = []
         try:
             root = ET.fromstring(raw)
-            for idx, it in enumerate(root.findall(".//item")[:limit]):
-                title = strip_html(it.findtext("title") or "")
-                summary = strip_html(it.findtext("description") or "")
-                if len(summary) > 190:
-                    summary = summary[:187].rstrip() + "..."
-                link = str(it.findtext("link") or "").strip()
-                pub = str(it.findtext("pubDate") or "").strip()
+            for idx, it_el in enumerate(root.findall(".//item")[:limit]):
+                pub = str(it_el.findtext("pubDate") or "").strip()
                 pdt = None
                 if pub:
                     try:
@@ -1360,35 +1482,46 @@ def fetch_rugby_news() -> list[dict]:
                         pdt = parsedate_to_datetime(pub).astimezone(UTC_TZ)
                     except Exception:
                         pdt = None
-                times = format_arg_times(pdt)
-                img = ""
-                for child in list(it):
+                # Choose largest resolution media:content / thumbnail / enclosure
+                best_img = ""
+                best_w = -1
+                for child in list(it_el):
                     tag = child.tag.split("}")[-1].lower()
-                    if tag in ("thumbnail", "content", "enclosure") and child.attrib.get("url"):
-                        img = clean_url(child.attrib.get("url"))
-                        break
-                if title and link:
-                    out.append({
-                        "id": f"{source}:{idx}:{times['ts']}",
-                        "title": title,
-                        "summary": summary,
-                        "url": link,
-                        "imageUrl": img,
-                        "source": source,
-                        "category": category,
-                        "dateArg": times["dateArg"],
-                        "ts": times["ts"],
-                    })
+                    u = child.attrib.get("url") or ""
+                    if tag in ("thumbnail", "content", "enclosure") and u:
+                        w_raw = str(child.attrib.get("width") or "0")
+                        w = int(w_raw) if w_raw.isdigit() else (600 if tag == "enclosure" else 200)
+                        if w >= best_w:
+                            best_w = w
+                            best_img = u
+                ts_hint = int(pdt.timestamp()) if pdt else idx
+                item = build_item(
+                    f"{source}:{idx}:{ts_hint}",
+                    it_el.findtext("title") or "",
+                    it_el.findtext("description") or "",
+                    it_el.findtext("link") or "",
+                    best_img,
+                    source,
+                    default_cat,
+                    pdt,
+                )
+                if item:
+                    out.append(item)
         except Exception:
             pass
         return out
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
         futs = [
-            ex.submit(from_wp, "https://uar.com.ar/wp-json/wp/v2/posts?per_page=10&_embed", "UAR Oficial", "pumas"),
-            ex.submit(from_wp, "https://urba.org.ar/wp-json/wp/v2/posts?per_page=10&_embed", "URBA Oficial", "urba"),
-            ex.submit(from_rss, "https://www.cordobaxv.com.ar/feed/", "Córdoba XV", "pumas", 10),
-            ex.submit(from_rss, "https://feeds.bbci.co.uk/sport/rugby-union/rss.xml", "BBC Rugby", "internacional", 12),
+            ex.submit(from_wp, "https://uar.com.ar/wp-json/wp/v2/posts?per_page=12&_embed", "UAR Oficial", "pumas"),
+            ex.submit(from_wp, "https://urba.org.ar/wp-json/wp/v2/posts?per_page=12&_embed", "URBA Oficial", "urba"),
+            ex.submit(from_world_rugby_es),
+            ex.submit(from_rss, "https://www.cordobaxv.com.ar/feed/", "Córdoba XV", "pumas", 12),
+            ex.submit(from_rss, "https://www.planetrugby.com/rss", "Planet Rugby", "internacional", 16),
+            ex.submit(from_rss, "https://www.rugbyrama.fr/rss.xml", "Rugbyrama", "internacional", 18),
+            ex.submit(from_rss, "https://www.skysports.com/rss/12321", "Sky Sports Rugby", "internacional", 16),
+            ex.submit(from_rss, "https://www.theguardian.com/sport/rugby-union/rss", "The Guardian", "internacional", 14),
+            ex.submit(from_rss, "https://feeds.bbci.co.uk/sport/rugby-union/rss.xml", "BBC Rugby", "internacional", 14),
         ]
         for f in concurrent.futures.as_completed(futs):
             try:
@@ -1399,11 +1532,59 @@ def fetch_rugby_news() -> list[dict]:
     seen = set()
     deduped = []
     for it in sorted(items, key=lambda x: x["ts"], reverse=True):
-        k = norm_key(it["title"])[:60]
+        k = norm_key(it["title"])[:64]
         if k not in seen:
             seen.add(k)
             deduped.append(it)
-    return deduped[:36]
+    return deduped[:90]
+
+
+def build_confirmed_lineups(matches: list[dict], teams_dir: list[dict]) -> list[dict]:
+    dir_map = {t["key"]: t for t in teams_dir}
+    out = []
+    seen_teams = set()
+    # 1) Prioritize matches with actual verified lineups, Argentina first then newest
+    cand_matches = [
+        m for m in matches
+        if (m.get("home", {}).get("lineup") or m.get("away", {}).get("lineup"))
+    ]
+    cand_matches.sort(key=lambda m: (0 if m.get("isArgentina") else 1, -(m.get("ts") or 0)))
+
+    for m in cand_matches:
+        for side_key, opp_key in (("home", "away"), ("away", "home")):
+            tm = m[side_key]
+            lineup = tm.get("lineup") or []
+            if len(lineup) < 7:
+                continue
+            tnk = norm_key(tm.get("name") or "")
+            if not tnk or tnk in seen_teams:
+                continue
+            seen_teams.add(tnk)
+            d_entry = dir_map.get(tnk, {})
+            captain_p = next((p.get("name") for p in lineup if p.get("captain")), "")
+            out.append({
+                "teamKey": tnk,
+                "teamName": tm.get("name") or "",
+                "opponentName": (m[opp_key] or {}).get("name") or "",
+                "leagueName": m.get("leagueShort") or m.get("leagueName") or "",
+                "matchId": m.get("id") or "",
+                "dateArg": m.get("dateArg") or "",
+                "ts": m.get("ts") or 0,
+                "crestUrl": tm.get("crestUrl") or d_entry.get("crestUrl") or "",
+                "flagUrl": tm.get("flagUrl") or d_entry.get("flagUrl") or "",
+                "coach": tm.get("coach") or d_entry.get("coach") or "",
+                "captain": captain_p or "",
+                "startersCount": sum(1 for p in lineup if p.get("starter")),
+                "playersCount": len(lineup),
+                "players": lineup,
+                "isArgentina": bool(m.get("isArgentina") or "argentina" in tnk),
+            })
+            if len(out) >= 18:
+                break
+        if len(out) >= 18:
+            break
+    out.sort(key=lambda x: (0 if x["isArgentina"] else 1, -(x["ts"] or 0)))
+    return out
 
 def main() -> None:
     now_utc = dt.datetime.now(UTC_TZ)
@@ -1496,8 +1677,11 @@ def main() -> None:
         {"name": "Súper Rugby Américas", "team": "Pampas · Dogos XV · Tarucas", "status": "Franquicias profesionales argentinas", "coach": "Sudamérica Rugby"},
     ]
 
+    confirmed_lineups = build_confirmed_lineups(matches, teams_dir)
+
     payload = {
-        "engineVersion": "2.0.0-RUGBY-PRO-MAX",
+        "engineVersion": "3.1.0-RUGBY-PRO-LUX",
+        "confirmedLineups": confirmed_lineups,
         "urba": urba_data,
         "news": news_items,
         "argentinaHub": {
@@ -1548,6 +1732,8 @@ def main() -> None:
                 "statusCounts": status_counts,
                 "groupCounts": group_counts,
                 "argMatches": len(arg_matches),
+                "newsCount": len(news_items),
+                "confirmedLineups": len(confirmed_lineups),
                 "teamsDirectory": len(teams_dir),
                 "totalLoggedMatches": total_history,
                 "totalRosters": total_rosters,

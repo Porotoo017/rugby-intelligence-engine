@@ -14,6 +14,9 @@
     urbaSubTab: 'standings',
     urbaSearch: '',
     newsCat: 'all',
+    newsSearch: '',
+    sheetMatchId: null,
+    sheetTab: 'summary',
     teamsSubTab: 'all',
     teamsSearch: '',
     rankGender: 'men',
@@ -235,8 +238,18 @@
     const coaches = (d.argentinaHub && d.argentinaHub.coaches) || { xv: 'Felipe Contepomi', sevens: 'Santiago Gómez Cora' };
     const st = d.statusCounts || {};
     const clubsCount = (d.urba && d.urba.clubs && d.urba.clubs.length) || 99;
-    const rkMen = (d.rankings && d.rankings.men && d.rankings.men.length) || 30;
+    const newsList = d.news || [];
     const dirCount = (d.teamsDirectory && d.teamsDirectory.length) || 0;
+    const topStory = newsList.find((n) => n.topic === 'alineaciones' || n.topic === 'fichajes') || newsList[0];
+
+    const tickerHtml = topStory ? `
+      <div class="hero-ticker">
+        <a class="hero-ticker-left" href="${esc(topStory.url)}" target="_blank" rel="noopener noreferrer" title="${esc(topStory.title)}">
+          <span class="hero-ticker-tag">${esc((topStory.topicLabel || topStory.source || 'ÚLTIMA HORA').toUpperCase())}</span>
+          <span class="hero-ticker-title">${esc(topStory.title)}</span>
+        </a>
+        <button class="hero-ticker-cta" data-jump-tab="news" type="button">${newsList.length} noticias ›</button>
+      </div>` : '';
 
     const mainHtml = xv ? `
       <div class="hero-main-col">
@@ -288,6 +301,7 @@
       <section class="stadium-hero">
         <img src="./assets/hero_stadium.jpg" alt="Estadio Internacional de Rugby" class="stadium-bg" referrerpolicy="no-referrer" />
         <div class="stadium-scrim">
+          ${tickerHtml}
           <div class="hero-split">
             ${mainHtml}
             ${sideHtml}
@@ -304,14 +318,92 @@
           <div class="kpi-label">Clubes URBA Buenos Aires (8 divisiones)</div>
         </div>
         <div class="kpi-cell">
-          <div class="kpi-num">${esc(dirCount)}</div>
-          <div class="kpi-label">Escudos y banderas verificadas</div>
+          <div class="kpi-num">${esc(newsList.length)}</div>
+          <div class="kpi-label">Noticias, bajas y fichajes · Sync diario</div>
         </div>
         <div class="kpi-cell">
-          <div class="kpi-num">${esc(rkMen)} / 25</div>
-          <div class="kpi-label">Rankings Mundiales · Act. ${esc(d.generatedAtArg || '')}</div>
+          <div class="kpi-num">${esc(dirCount)}</div>
+          <div class="kpi-label">Escudos y banderas · ${esc(d.generatedAtArg || '')}</div>
         </div>
       </div>`;
+  }
+
+  function renderHomePulse(d) {
+    const allNews = d.news || [];
+    if (!allNews.length) return '';
+    // Pick up to 4 diverse highlights prioritizing lineups, transfers & Pumas
+    const picked = [];
+    const seenIds = new Set();
+    for (const wanted of ['alineaciones', 'fichajes', 'pumas']) {
+      const hit = allNews.find((n) => (n.topic === wanted || (n.tags || []).includes(wanted)) && !seenIds.has(n.id));
+      if (hit) {
+        picked.push(hit);
+        seenIds.add(hit.id);
+      }
+    }
+    for (const n of allNews) {
+      if (picked.length >= 4) break;
+      if (!seenIds.has(n.id)) {
+        picked.push(n);
+        seenIds.add(n.id);
+      }
+    }
+
+    const newsItemsHtml = picked.map((n) => `
+      <a class="pulse-news-item" href="${esc(n.url)}" target="_blank" rel="noopener noreferrer">
+        <div class="pulse-thumb">
+          ${n.imageUrl
+            ? `<img src="${esc(n.imageUrl)}" alt="${esc(n.title)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none';" />`
+            : ''}
+        </div>
+        <div class="pulse-news-info">
+          <div class="pulse-news-meta">${esc(n.topicLabel || n.source)} <span>· ${esc(n.source)} · ${esc(n.dateArg || '')}</span></div>
+          <div class="pulse-news-title">${esc(n.title)}</div>
+        </div>
+      </a>`).join('');
+
+    const menRk = (d.rankings && d.rankings.men) || [];
+    const topFive = menRk.slice(0, 5);
+    const argRk = menRk.find((r) => norm(r.team) === 'argentina');
+    const rkShow = argRk && !topFive.some((r) => norm(r.team) === 'argentina') ? [...topFive, argRk] : menRk.slice(0, 6);
+
+    const rkHtml = rkShow.map((r) => {
+      const diff = r.prevPos && r.pos ? r.prevPos - r.pos : 0;
+      const diffTxt = diff > 0 ? `▲${diff}` : (diff < 0 ? `▼${Math.abs(diff)}` : '—');
+      const diffCol = diff > 0 ? 'var(--turf)' : (diff < 0 ? 'var(--crimson)' : 'var(--text-dim)');
+      const isArg = norm(r.team) === 'argentina';
+      return `
+        <div class="pulse-rank-row ${isArg ? 'is-arg' : ''}">
+          <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+            <span class="mono-num" style="font-weight:800;min-width:22px;color:${r.pos <= 4 ? 'var(--gold)' : 'var(--text-dim)'};">#${r.pos}</span>
+            ${r.flagUrl ? `<img class="flag-inline" src="${esc(r.flagUrl)}" alt="${esc(r.team)}" loading="lazy" referrerpolicy="no-referrer" />` : ''}
+            ${renderTeamVisual(r.crestUrl, '', r.team, 'sm')}
+            <span style="font-weight:${isArg ? '800' : '600'};font-size:0.86rem;color:${isArg ? 'var(--sky)' : 'var(--text)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.team)}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
+            <span class="mono-num" style="font-size:0.8rem;font-weight:700;">${Number(r.pts || 0).toFixed(2)}</span>
+            <span class="mono-num" style="font-size:0.74rem;font-weight:700;color:${diffCol};min-width:22px;text-align:right;">${diffTxt}</span>
+          </div>
+        </div>`;
+    }).join('');
+
+    return `
+      <section class="pulse-grid" aria-label="Resumen diario y ranking">
+        <div class="pulse-panel">
+          <div class="pulse-head">
+            <h2>Pulso Diario · Bajas, Fichajes y Noticias</h2>
+            <button class="action-btn" data-jump-tab="news" type="button">Ver ${allNews.length} ›</button>
+          </div>
+          ${newsItemsHtml}
+        </div>
+        <div class="pulse-panel">
+          <div class="pulse-head">
+            <h2>World Rugby Top Ranking</h2>
+            <button class="action-btn" data-jump-ranking="1" type="button">Completo ›</button>
+          </div>
+          ${rkHtml}
+        </div>
+      </section>`;
   }
 
   function renderToolbar(searchId, searchVal, placeholder) {
@@ -359,6 +451,7 @@
       ? `<div class="cards-grid">${filtered.slice(0, 96).map(renderMatchCard).join('')}</div>`
       : `<div class="empty-box">No hay partidos que coincidan con "${esc(state.search || state.matchGroup)}". Probá cambiando el filtro arriba.</div>`;
 
+    const showPulse = (state.matchGroup === 'all' || state.matchGroup === 'arg') && !q;
     return `
       ${state.matchGroup === 'all' || state.matchGroup === 'arg' ? renderStadiumHero(d) : ''}
       ${renderToolbar('matchSearchInput', state.search, 'Buscar equipo, país, torneo, URBA, Top 14 o estadio...')}
@@ -368,15 +461,16 @@
       <div class="sub-seg">
         ${statusTabs.map((s) => `<button class="sub-btn ${state.matchStatus === s.id ? 'active' : ''}" data-match-status="${s.id}" type="button">${esc(s.label)}</button>`).join('')}
       </div>
-      ${cardsHtml}`;
+      ${cardsHtml}
+      ${showPulse ? renderHomePulse(d) : ''}`;
   }
-
   function renderPumasTab(d) {
     const hub = d.argentinaHub || {};
     const roster = hub.xvRoster || [];
     const tournaments = hub.tournaments || [];
     const argMatches = d.argentinaMatches || [];
-    const pumasNews = (d.news || []).filter((n) => n.category === 'pumas' || /puma|uar|contepomi|g[oó]mez cora|argentina/i.test(n.title)).slice(0, 6);
+    const confirmed = d.confirmedLineups || [];
+    const pumasNews = (d.news || []).filter((n) => (n.tags || []).includes('pumas') || n.category === 'pumas').slice(0, 6);
 
     const forwards = roster.filter((p) => p.starter && Number(p.jersey) <= 8);
     const backs = roster.filter((p) => p.starter && Number(p.jersey) >= 9);
@@ -396,20 +490,45 @@
       </div>`;
 
     const rosterHtml = roster.length ? `
-      <div class="tactical-grid">
-        <div class="tactical-col">
-          <h4>Forwards Titulares (1–8)</h4>
-          ${forwards.map(playerRow).join('') || '<div class="empty-box">Sin datos</div>'}
-        </div>
-        <div class="tactical-col">
-          <h4>Backs Titulares (9–15)</h4>
-          ${backs.map(playerRow).join('') || '<div class="empty-box">Sin datos</div>'}
-        </div>
-        <div class="tactical-col">
-          <h4 style="color:var(--sky);">Banco e Impacto (16–23)</h4>
-          ${bench.map(playerRow).join('') || '<div class="empty-box">Banco por confirmar</div>'}
+      <div class="pitch-board">
+        <div class="tactical-grid">
+          <div class="tactical-col">
+            <h4>Forwards Titulares (1–8)</h4>
+            ${forwards.map(playerRow).join('') || '<div class="empty-box">Sin datos</div>'}
+          </div>
+          <div class="tactical-col">
+            <h4>Backs Titulares (9–15)</h4>
+            ${backs.map(playerRow).join('') || '<div class="empty-box">Sin datos</div>'}
+          </div>
+          <div class="tactical-col">
+            <h4 style="color:var(--sky);">Banco e Impacto (16–23)</h4>
+            ${bench.map(playerRow).join('') || '<div class="empty-box">Banco por confirmar</div>'}
+          </div>
         </div>
       </div>` : `<div class="empty-box">Alineación de Los Pumas se actualiza al confirmarse el próximo Test Match.</div>`;
+
+    const confirmedHtml = confirmed.length ? `
+      <div class="section-head">
+        <h2 class="section-title">Alineaciones Oficiales Verificadas</h2>
+        <span class="section-sub">${confirmed.length} planteles XV recientes · Tocá para ver la formación completa</span>
+      </div>
+      <div class="dir-grid">
+        ${confirmed.slice(0, 9).map((cl) => `
+          <button class="lineup-mini-card" data-match-id="${esc(cl.matchId)}" data-open-lineup="1" type="button">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;">
+              <span style="font-size:0.72rem;font-weight:700;color:var(--gold);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(cl.leagueName)}</span>
+              <span class="mono-num" style="font-size:0.7rem;color:var(--text-dim);white-space:nowrap;">${esc(cl.dateArg)}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:11px;min-width:0;">
+              ${renderTeamVisual(cl.crestUrl, cl.flagUrl, cl.teamName, 'lg')}
+              <div style="min-width:0;flex:1;">
+                <div style="font-weight:700;font-size:0.94rem;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(cl.teamName)}</div>
+                <div style="font-size:0.75rem;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">vs ${esc(cl.opponentName)} · ${esc(cl.playersCount)} jugadores</div>
+              </div>
+            </div>
+            <div style="font-size:0.74rem;color:var(--sky);font-weight:600;">Ver XV titular y banco ›</div>
+          </button>`).join('')}
+      </div>` : '';
 
     const newsHtml = pumasNews.length
       ? `<div class="news-grid">${pumasNews.map(renderNewsCard).join('')}</div>`
@@ -439,6 +558,7 @@
         <span class="section-sub">Head Coach: ${esc((hub.coaches && hub.coaches.xv) || 'Felipe Contepomi')}</span>
       </div>
       ${rosterHtml}
+      ${confirmedHtml}
       ${newsHtml ? `
         <div class="section-head">
           <h2 class="section-title">Últimas Noticias de Los Pumas &amp; UAR</h2>
@@ -446,7 +566,6 @@
         </div>
         ${newsHtml}` : ''}`;
   }
-
   function renderUrbaTab(d) {
     const urba = d.urba || {};
     const champs = urba.championships || [];
@@ -546,11 +665,12 @@
          <div class="news-media-fallback" style="display:none;">RUGBY PRO</div>`
       : `<div class="news-media-fallback">RUGBY PRO</div>`;
 
+    const topicTxt = n.topicLabel && n.topicLabel !== 'Mundo Rugby' ? ` · ${n.topicLabel}` : '';
     return `
       <a class="news-card" href="${esc(n.url)}" target="_blank" rel="noopener noreferrer">
         <div class="news-media">${mediaHtml}</div>
         <div class="news-body">
-          <div class="news-meta">${esc(n.source)} <span>· ${esc(n.dateArg || 'Hoy')}</span></div>
+          <div class="news-meta">${esc(n.source)}${esc(topicTxt)} <span>· ${esc(n.dateArg || 'Hoy')}</span></div>
           <h3 class="news-title">${esc(n.title)}</h3>
           ${n.summary ? `<p class="news-summary">${esc(n.summary)}</p>` : ''}
           <span class="news-link">Leer nota completa ↗</span>
@@ -558,27 +678,66 @@
       </a>`;
   }
 
+  function renderLeadNewsCard(n) {
+    const mediaHtml = n.imageUrl
+      ? `<img src="${esc(n.imageUrl)}" alt="${esc(n.title)}" referrerpolicy="no-referrer"
+              onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
+         <div class="news-media-fallback" style="display:none;">RUGBY PRO</div>`
+      : `<div class="news-media-fallback">RUGBY PRO</div>`;
+    return `
+      <a class="news-lead" href="${esc(n.url)}" target="_blank" rel="noopener noreferrer">
+        <div class="news-lead-media">${mediaHtml}</div>
+        <div class="news-lead-body">
+          <div>
+            <div class="news-meta">${esc(n.topicLabel || 'Destacado')} · ${esc(n.source)} <span>· ${esc(n.dateArg || 'Hoy')}</span></div>
+            <h2 class="news-lead-title" style="margin-top:8px;">${esc(n.title)}</h2>
+            ${n.summary ? `<p class="news-summary" style="-webkit-line-clamp:4;margin-top:10px;font-size:0.88rem;">${esc(n.summary)}</p>` : ''}
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;padding-top:10px;border-top:1px solid var(--border);">
+            <span style="font-size:0.78rem;color:var(--text-dim);">Edición diaria verificada</span>
+            <span style="font-size:0.84rem;font-weight:700;color:var(--gold);">Leer nota completa ↗</span>
+          </div>
+        </div>
+      </a>`;
+  }
+
   function renderNewsTab(d) {
     const allNews = d.news || [];
+    const hasTag = (n, tag) => n.topic === tag || n.category === tag || (Array.isArray(n.tags) && n.tags.includes(tag));
     const cats = [
       { id: 'all', label: `Todas (${allNews.length})` },
-      { id: 'pumas', label: `Los Pumas / UAR (${allNews.filter((n) => n.category === 'pumas').length})` },
-      { id: 'urba', label: `URBA Buenos Aires (${allNews.filter((n) => n.category === 'urba').length})` },
-      { id: 'internacional', label: `Internacional (${allNews.filter((n) => n.category === 'internacional').length})` },
+      { id: 'alineaciones', label: `Alineaciones y Bajas (${allNews.filter((n) => hasTag(n, 'alineaciones')).length})` },
+      { id: 'fichajes', label: `Fichajes y Mercado (${allNews.filter((n) => hasTag(n, 'fichajes')).length})` },
+      { id: 'pumas', label: `Los Pumas / UAR (${allNews.filter((n) => hasTag(n, 'pumas')).length})` },
+      { id: 'urba', label: `URBA Bs.As. (${allNews.filter((n) => hasTag(n, 'urba')).length})` },
+      { id: 'internacional', label: `Mundo Rugby (${allNews.filter((n) => hasTag(n, 'internacional')).length})` },
     ];
-    const filtered = allNews.filter((n) => state.newsCat === 'all' || n.category === state.newsCat);
+    const q = norm(state.newsSearch);
+    const filtered = allNews.filter((n) => {
+      if (state.newsCat !== 'all' && !hasTag(n, state.newsCat)) return false;
+      if (q) {
+        const hay = norm(`${n.title} ${n.summary || ''} ${n.source} ${n.topicLabel || ''}`);
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+
+    const leadCard = filtered.length ? renderLeadNewsCard(filtered[0]) : '';
+    const restCards = filtered.slice(1);
 
     return `
       <div class="section-head" style="margin-top:2px;">
-        <h1 class="section-title">Últimas Noticias de Rugby</h1>
-        <span class="section-sub">UAR · URBA · Córdoba XV · BBC Rugby</span>
+        <h1 class="section-title">Noticias, Alineaciones y Fichajes</h1>
+        <span class="section-sub">9 fuentes oficiales · Actualización automática diaria</span>
       </div>
+      ${renderToolbar('newsSearchInput', state.newsSearch, 'Buscar jugador, lesión, fichaje, club, Los Pumas o torneo...')}
       <div class="filter-scroll">
         ${cats.map((c) => `<button class="seg-tab ${state.newsCat === c.id ? 'active' : ''}" data-news-cat="${c.id}" type="button">${esc(c.label)}</button>`).join('')}
       </div>
-      ${filtered.length ? `<div class="news-grid">${filtered.map(renderNewsCard).join('')}</div>` : `<div class="empty-box">No hay noticias en esta categoría.</div>`}`;
+      ${filtered.length
+        ? `${leadCard}${restCards.length ? `<div class="news-grid">${restCards.map(renderNewsCard).join('')}</div>` : ''}`
+        : `<div class="empty-box">No hay noticias que coincidan con "${esc(state.newsSearch || state.newsCat)}".</div>`}`;
   }
-
   function renderTeamsTab(d) {
     const clubsUrba = (d.urba && d.urba.clubs) || [];
     const dir = d.teamsDirectory || [];
@@ -751,7 +910,7 @@
     els.detailSheet.classList.add('hidden');
   }
 
-  function openMatchSheet(matchId) {
+  function openMatchSheet(matchId, forcedTab) {
     if (!state.data) return;
     let m = (state.data.matches || []).find((x) => x.id === matchId);
     if (!m && state.data.urba && state.data.urba.championships) {
@@ -762,14 +921,21 @@
     }
     if (!m) return;
 
+    if (forcedTab) {
+      state.sheetTab = forcedTab;
+    } else if (state.sheetMatchId !== matchId) {
+      const hasScoring = m.scoring && m.scoring.length > 0;
+      const hasLineup = (m.home.lineup && m.home.lineup.length) || (m.away.lineup && m.away.lineup.length);
+      state.sheetTab = hasScoring ? 'summary' : (hasLineup ? 'lineups' : 'summary');
+    }
+    state.sheetMatchId = matchId;
+
     const renderLineupCol = (tm) => {
-      const list = (tm.lineup && tm.lineup.length) ? tm.lineup : (tm.probableLineup || []);
-      const badge = (tm.lineup && tm.lineup.length)
-        ? 'Formación Oficial'
-        : (tm.probableLineup && tm.probableLineup.length ? `Última formación (${tm.probableFromDate || 'reciente'})` : '');
+      const list = tm.lineup || [];
+      const badge = tm.coach ? `DT: ${tm.coach}` : (tm.worldRank ? `World Rank #${tm.worldRank}` : '');
       return `
         <div>
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
             ${renderTeamVisual(tm.crestUrl, tm.flagUrl, tm.name, 'sm')}
             <div>
               <div style="font-weight:700;color:var(--text);">${esc(tm.name)}</div>
@@ -779,13 +945,62 @@
           ${list.length ? list.map((p) => `
             <div class="player-row">
               <span><span class="jersey-num">${esc(p.jersey)}</span>${esc(p.name)}${p.captain ? ' (C)' : ''}</span>
-              <span style="color:var(--text-dim);font-size:0.75rem;">${esc(p.position)}</span>
+              <span style="color:var(--text-dim);font-size:0.75rem;">${esc(p.position)}${p.caps ? ` · ${p.caps}c` : ''}</span>
             </div>`).join('') : `<div style="font-size:0.82rem;color:var(--text-dim);">Sin planilla confirmada aún para este cruce.</div>`}
         </div>`;
     };
 
     const hasScores = m.status !== 'scheduled' && m.home.score != null && m.away.score != null;
     const scoreStr = hasScores ? `${m.home.score} — ${m.away.score}` : (m.timeArg && m.timeArg !== '00:00' ? m.timeArg : 'Programado');
+    const totalLineup = ((m.home.lineup && m.home.lineup.length) || 0) + ((m.away.lineup && m.away.lineup.length) || 0);
+    const totalScoring = (m.scoring && m.scoring.length) || 0;
+    const totalOfficials = (m.officials && m.officials.length) || 0;
+
+    let tabBody = '';
+    if (state.sheetTab === 'lineups') {
+      tabBody = `
+        <div class="sheet-section">
+          <h3>Formaciones y Planteles</h3>
+          <div class="lineups-split">
+            ${renderLineupCol(m.home)}
+            ${renderLineupCol(m.away)}
+          </div>
+        </div>`;
+    } else if (state.sheetTab === 'info') {
+      tabBody = `
+        <div class="sheet-section">
+          <h3>Estadio, Horario y Autoridades</h3>
+          <div class="player-row"><span>Competencia</span><span style="font-weight:600;">${esc(m.leagueName)}${m.phase ? ` · ${esc(m.phase)}` : ''}</span></div>
+          <div class="player-row"><span>Fecha y Hora (ARG)</span><span class="mono-num" style="color:var(--gold);">${esc(m.dateArg || 'Por confirmar')}</span></div>
+          <div class="player-row"><span>Estadio / Ciudad</span><span>${esc([m.venue && m.venue.name, m.venue && m.venue.city].filter(Boolean).join(', ') || 'Sede oficial')}</span></div>
+        </div>
+        ${totalOfficials ? `
+          <div class="sheet-section">
+            <h3>Árbitros y Oficiales</h3>
+            ${m.officials.map((o) => `<div class="player-row"><span>${esc(o.name)}</span><span style="color:var(--text-dim);">${esc(o.role || 'Oficial')}</span></div>`).join('')}
+          </div>` : ''}`;
+    } else {
+      tabBody = `
+        ${totalScoring ? `
+          <div class="sheet-section">
+            <h3>Puntos y Anotadores</h3>
+            ${m.scoring.map((s) => `<div class="player-row"><span><strong>${esc(s.type)}</strong> · ${esc(s.player)} (${esc(s.teamName)})</span><span class="mono-num" style="color:var(--gold);">${esc(s.minute)}</span></div>`).join('')}
+          </div>` : `
+          <div class="sheet-section">
+            <h3>Resumen del Encuentro</h3>
+            <div class="player-row"><span>Estado</span><span style="color:var(--gold);font-weight:700;">${esc(formatStatusLabel(m))}</span></div>
+            <div class="player-row"><span>Sede</span><span>${esc([m.venue && m.venue.name, m.venue && m.venue.city].filter(Boolean).join(', ') || 'Sede oficial')}</span></div>
+            ${m.home.coach || m.away.coach ? `<div class="player-row"><span>Head Coaches</span><span>${esc([m.home.coach, m.away.coach].filter(Boolean).join(' vs '))}</span></div>` : ''}
+          </div>`}
+        ${totalLineup ? `
+          <div class="sheet-section">
+            <h3>Formaciones Destacadas</h3>
+            <div class="lineups-split">
+              ${renderLineupCol(m.home)}
+              ${renderLineupCol(m.away)}
+            </div>
+          </div>` : ''}`;
+    }
 
     openSheet(`
       <div class="sheet-head">
@@ -796,30 +1011,18 @@
         </div>
         <button class="action-btn" data-close-sheet="1" type="button">Cerrar</button>
       </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface-2);border:1px solid var(--border);border-radius:14px;padding:14px 16px;margin-bottom:10px;gap:10px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface-2);border:1px solid var(--border);border-radius:14px;padding:14px 16px;margin-bottom:12px;gap:10px;">
         <div style="display:flex;align-items:center;gap:10px;min-width:0;">${renderTeamVisual(m.home.crestUrl, m.home.flagUrl, m.home.name, 'lg')}<span style="font-weight:700;">${esc(m.home.name)}</span></div>
         <div style="font-family:var(--font-display);font-size:1.85rem;font-weight:800;color:var(--gold);font-variant-numeric:tabular-nums;white-space:nowrap;">${esc(scoreStr)}</div>
         <div style="display:flex;align-items:center;gap:10px;min-width:0;"><span style="font-weight:700;text-align:right;">${esc(m.away.name)}</span>${renderTeamVisual(m.away.crestUrl, m.away.flagUrl, m.away.name, 'lg')}</div>
       </div>
-      ${(m.scoring && m.scoring.length) ? `
-        <div class="sheet-section">
-          <h3>Puntos y Anotadores</h3>
-          ${m.scoring.map((s) => `<div class="player-row"><span><strong>${esc(s.type)}</strong> · ${esc(s.player)} (${esc(s.teamName)})</span><span class="mono-num" style="color:var(--gold);">${esc(s.minute)}</span></div>`).join('')}
-        </div>` : ''}
-      <div class="sheet-section">
-        <h3>Formaciones y Planteles</h3>
-        <div class="lineups-split">
-          ${renderLineupCol(m.home)}
-          ${renderLineupCol(m.away)}
-        </div>
+      <div class="sub-seg" style="margin-bottom:6px;">
+        <button class="sub-btn ${state.sheetTab === 'summary' ? 'active' : ''}" data-sheet-tab="summary" type="button">Resumen${totalScoring ? ` (${totalScoring})` : ''}</button>
+        <button class="sub-btn ${state.sheetTab === 'lineups' ? 'active' : ''}" data-sheet-tab="lineups" type="button">Formaciones XV${totalLineup ? ` (${totalLineup})` : ''}</button>
+        <button class="sub-btn ${state.sheetTab === 'info' ? 'active' : ''}" data-sheet-tab="info" type="button">Estadio &amp; Árbitros</button>
       </div>
-      ${(m.officials && m.officials.length) ? `
-        <div class="sheet-section">
-          <h3>Árbitros y Oficiales</h3>
-          ${m.officials.map((o) => `<div class="player-row"><span>${esc(o.name)}</span><span style="color:var(--text-dim);">${esc(o.role || 'Oficial')}</span></div>`).join('')}
-        </div>` : ''}`);
+      ${tabBody}`);
   }
-
   function openUrbaClubSheet(clubId) {
     if (!state.data || !state.data.urba) return;
     const club = (state.data.urba.clubs || []).find((c) => String(c.id) === String(clubId));
@@ -942,6 +1145,17 @@
       setTab(jumpBtn.dataset.jumpTab);
       return;
     }
+    const rkJump = e.target.closest('[data-jump-ranking]');
+    if (rkJump) {
+      state.teamsSubTab = 'ranking';
+      setTab('teams');
+      return;
+    }
+    const sheetTabBtn = e.target.closest('[data-sheet-tab]');
+    if (sheetTabBtn && state.sheetMatchId) {
+      openMatchSheet(state.sheetMatchId, sheetTabBtn.dataset.sheetTab);
+      return;
+    }
     const mgBtn = e.target.closest('[data-match-group]');
     if (mgBtn) {
       state.matchGroup = mgBtn.dataset.matchGroup;
@@ -986,7 +1200,7 @@
     }
     const mCard = e.target.closest('[data-match-id]');
     if (mCard) {
-      openMatchSheet(mCard.dataset.matchId);
+      openMatchSheet(mCard.dataset.matchId, mCard.dataset.openLineup ? 'lineups' : undefined);
       return;
     }
     const uClub = e.target.closest('[data-urba-club-id]');
@@ -1009,6 +1223,9 @@
       render();
     } else if (e.target.id === 'teamsSearchInput') {
       state.teamsSearch = e.target.value;
+      render();
+    } else if (e.target.id === 'newsSearchInput') {
+      state.newsSearch = e.target.value;
       render();
     }
   });

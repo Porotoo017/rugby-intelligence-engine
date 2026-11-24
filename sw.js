@@ -1,8 +1,8 @@
-const CACHE_NAME = 'rugby-intel-v3.0';
+const CACHE_NAME = 'rugby-intel-v3.1';
 const STATIC_ASSETS = [
   './',
   './index.html',
-  './app.js?v=3.0.0',
+  './app.js?v=3.1.0',
   './manifest.json',
   './assets/hero_stadium.jpg',
   './assets/pumas_banner.jpg',
