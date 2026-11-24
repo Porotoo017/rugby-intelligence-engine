@@ -183,8 +183,8 @@
     const hFlag = m.home.flagUrl || (hMeta && hMeta.flagUrl) || '';
     const aFlag = m.away.flagUrl || (aMeta && aMeta.flagUrl) || '';
 
-    const hSub = m.home.coach ? `DT: ${m.home.coach}` : (m.home.worldRank ? `Ranking #${m.home.worldRank}` : (hMeta && hMeta.division ? `URBA ${hMeta.division}` : ''));
-    const aSub = m.away.coach ? `DT: ${m.away.coach}` : (m.away.worldRank ? `Ranking #${m.away.worldRank}` : (aMeta && aMeta.division ? `URBA ${aMeta.division}` : ''));
+    const hCoachC = cleanCoach(m.home.coach); const aCoachC = cleanCoach(m.away.coach); const hSub = hCoachC ? `DT: ${hCoachC}` : (m.home.worldRank ? `Ranking #${m.home.worldRank}` : (hMeta && hMeta.division ? `URBA ${hMeta.division}` : ''));
+    const aSub = aCoachC ? `DT: ${aCoachC}` : (m.away.worldRank ? `Ranking #${m.away.worldRank}` : (aMeta && aMeta.division ? `URBA ${aMeta.division}` : ''));
 
     const venueLabel = (m.venue && (m.venue.name || m.venue.city))
       ? [m.venue.name, m.venue.city].filter(Boolean).join(', ')
@@ -827,7 +827,7 @@
             name: t.name,
             crestUrl: t.crestUrl,
             flagUrl: t.flagUrl || 'https://flagcdn.com/w80/fr.png',
-            sub1: `Top 14 Francia${t.coach ? ` · DT: ${t.coach}` : ''}`,
+            sub1: `Top 14 Francia${cleanCoach(t.coach) ? ` · DT: ${cleanCoach(t.coach)}` : ''}`,
             sub2: t.stadium || (t.roster && t.roster.length ? `${t.roster.length} jugadores verificados` : 'Club Top 14'),
           }));
       } else if (state.teamsSubTab === 'nations') {
@@ -839,7 +839,7 @@
             name: t.name,
             crestUrl: t.crestUrl,
             flagUrl: t.flagUrl || '',
-            sub1: `${t.worldRank ? `Ranking #${t.worldRank}` : 'Selección / Franquicia'}${t.coach ? ` · DT: ${t.coach}` : ''}`,
+            sub1: `${t.worldRank ? `Ranking #${t.worldRank}` : 'Selección / Franquicia'}${cleanCoach(t.coach) ? ` · DT: ${cleanCoach(t.coach)}` : ''}`,
             sub2: t.stadium || (t.roster && t.roster.length ? `${t.roster.length} jugadores en plantel` : 'Selección Oficial'),
           }));
       } else {
@@ -849,7 +849,7 @@
           name: t.name,
           crestUrl: t.crestUrl,
           flagUrl: t.flagUrl || '',
-          sub1: [t.worldRank ? `#${t.worldRank} Mundial` : '', t.coach ? `DT: ${t.coach}` : '', (t.leagues || [])[0] || ''].filter(Boolean).join(' · ') || 'Equipo Oficial',
+          sub1: [t.worldRank ? `#${t.worldRank} Mundial` : '', cleanCoach(t.coach) ? `DT: ${cleanCoach(t.coach)}` : '', (t.leagues || [])[0] || ''].filter(Boolean).join(' · ') || 'Equipo Oficial',
           sub2: t.stadium || (t.roster && t.roster.length ? `${t.roster.length} jugadores verificados` : 'Escudo y ficha oficial'),
         }));
         const urbaMapped = clubsUrba.map((c) => ({
@@ -910,6 +910,12 @@
     els.detailSheet.classList.add('hidden');
   }
 
+  function cleanCoach(val) {
+    const s = String(val || '').replace(/\s*\[[^\]]*\]/g, '').trim();
+    if (!s || /^(vacant|tbc|tba|none|n\/a|-)$/i.test(s)) return '';
+    return s;
+  }
+
   function openMatchSheet(matchId, forcedTab) {
     if (!state.data) return;
     let m = (state.data.matches || []).find((x) => x.id === matchId);
@@ -921,23 +927,36 @@
     }
     if (!m) return;
 
+    const getTeamLineup = (tm) => {
+      if (tm && tm.lineup && tm.lineup.length) return { list: tm.lineup, official: true };
+      if (tm && tm.probableLineup && tm.probableLineup.length) return { list: tm.probableLineup, official: false };
+      return { list: [], official: true };
+    };
+
+    const hLineupInfo = getTeamLineup(m.home);
+    const aLineupInfo = getTeamLineup(m.away);
+    const totalLineup = hLineupInfo.list.length + aLineupInfo.list.length;
+    const totalScoring = (m.scoring && m.scoring.length) || 0;
+    const totalOfficials = (m.officials && m.officials.length) || 0;
+
     if (forcedTab) {
       state.sheetTab = forcedTab;
     } else if (state.sheetMatchId !== matchId) {
-      const hasScoring = m.scoring && m.scoring.length > 0;
-      const hasLineup = (m.home.lineup && m.home.lineup.length) || (m.away.lineup && m.away.lineup.length);
-      state.sheetTab = hasScoring ? 'summary' : (hasLineup ? 'lineups' : 'summary');
+      state.sheetTab = totalScoring > 0 ? 'summary' : (totalLineup > 0 ? 'lineups' : 'summary');
     }
     state.sheetMatchId = matchId;
 
-    const renderLineupCol = (tm) => {
-      const list = tm.lineup || [];
-      const badge = tm.coach ? `DT: ${tm.coach}` : (tm.worldRank ? `World Rank #${tm.worldRank}` : '');
+    const renderLineupCol = (tm, info) => {
+      const list = info.list;
+      const coachTxt = cleanCoach(tm.coach);
+      const badge = info.official
+        ? (coachTxt ? `DT: ${coachTxt}` : (tm.worldRank ? `World Rank #${tm.worldRank}` : ''))
+        : `Último XV verificado${tm.probableFromDate ? ` (${tm.probableFromDate})` : ''}`;
       return `
         <div>
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
             ${renderTeamVisual(tm.crestUrl, tm.flagUrl, tm.name, 'sm')}
-            <div>
+            <div style="min-width:0;">
               <div style="font-weight:700;color:var(--text);">${esc(tm.name)}</div>
               ${badge ? `<div style="font-size:0.74rem;color:var(--gold);">${esc(badge)}</div>` : ''}
             </div>
@@ -951,10 +970,15 @@
     };
 
     const hasScores = m.status !== 'scheduled' && m.home.score != null && m.away.score != null;
-    const scoreStr = hasScores ? `${m.home.score} — ${m.away.score}` : (m.timeArg && m.timeArg !== '00:00' ? m.timeArg : 'Programado');
-    const totalLineup = ((m.home.lineup && m.home.lineup.length) || 0) + ((m.away.lineup && m.away.lineup.length) || 0);
-    const totalScoring = (m.scoring && m.scoring.length) || 0;
-    const totalOfficials = (m.officials && m.officials.length) || 0;
+    const scoreMain = hasScores
+      ? `${m.home.score} — ${m.away.score}`
+      : (m.timeArg && m.timeArg !== '00:00' ? m.timeArg : 'Programado');
+    const scoreSub = hasScores
+      ? (m.status === 'live' ? (m.statusText || 'EN VIVO') : (m.statusText || 'Finalizado'))
+      : (m.dayArg || '');
+
+    const hCoach = cleanCoach(m.home.coach);
+    const aCoach = cleanCoach(m.away.coach);
 
     let tabBody = '';
     if (state.sheetTab === 'lineups') {
@@ -962,8 +986,8 @@
         <div class="sheet-section">
           <h3>Formaciones y Planteles</h3>
           <div class="lineups-split">
-            ${renderLineupCol(m.home)}
-            ${renderLineupCol(m.away)}
+            ${renderLineupCol(m.home, hLineupInfo)}
+            ${renderLineupCol(m.away, aLineupInfo)}
           </div>
         </div>`;
     } else if (state.sheetTab === 'info') {
@@ -990,14 +1014,14 @@
             <h3>Resumen del Encuentro</h3>
             <div class="player-row"><span>Estado</span><span style="color:var(--gold);font-weight:700;">${esc(formatStatusLabel(m))}</span></div>
             <div class="player-row"><span>Sede</span><span>${esc([m.venue && m.venue.name, m.venue && m.venue.city].filter(Boolean).join(', ') || 'Sede oficial')}</span></div>
-            ${m.home.coach || m.away.coach ? `<div class="player-row"><span>Head Coaches</span><span>${esc([m.home.coach, m.away.coach].filter(Boolean).join(' vs '))}</span></div>` : ''}
+            ${hCoach || aCoach ? `<div class="player-row"><span>Head Coaches</span><span>${esc([hCoach, aCoach].filter(Boolean).join(' vs '))}</span></div>` : ''}
           </div>`}
         ${totalLineup ? `
           <div class="sheet-section">
             <h3>Formaciones Destacadas</h3>
             <div class="lineups-split">
-              ${renderLineupCol(m.home)}
-              ${renderLineupCol(m.away)}
+              ${renderLineupCol(m.home, hLineupInfo)}
+              ${renderLineupCol(m.away, aLineupInfo)}
             </div>
           </div>` : ''}`;
     }
@@ -1011,10 +1035,19 @@
         </div>
         <button class="action-btn" data-close-sheet="1" type="button">Cerrar</button>
       </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface-2);border:1px solid var(--border);border-radius:14px;padding:14px 16px;margin-bottom:12px;gap:10px;">
-        <div style="display:flex;align-items:center;gap:10px;min-width:0;">${renderTeamVisual(m.home.crestUrl, m.home.flagUrl, m.home.name, 'lg')}<span style="font-weight:700;">${esc(m.home.name)}</span></div>
-        <div style="font-family:var(--font-display);font-size:1.85rem;font-weight:800;color:var(--gold);font-variant-numeric:tabular-nums;white-space:nowrap;">${esc(scoreStr)}</div>
-        <div style="display:flex;align-items:center;gap:10px;min-width:0;"><span style="font-weight:700;text-align:right;">${esc(m.away.name)}</span>${renderTeamVisual(m.away.crestUrl, m.away.flagUrl, m.away.name, 'lg')}</div>
+      <div class="sheet-scorebar">
+        <div class="sheet-score-team home">
+          ${renderTeamVisual(m.home.crestUrl, m.home.flagUrl, m.home.name, 'lg')}
+          <span class="sheet-score-name">${esc(m.home.name)}</span>
+        </div>
+        <div class="sheet-score-center">
+          <div class="sheet-score-val">${esc(scoreMain)}</div>
+          ${scoreSub ? `<div class="sheet-score-sub">${esc(scoreSub)}</div>` : ''}
+        </div>
+        <div class="sheet-score-team away">
+          ${renderTeamVisual(m.away.crestUrl, m.away.flagUrl, m.away.name, 'lg')}
+          <span class="sheet-score-name">${esc(m.away.name)}</span>
+        </div>
       </div>
       <div class="sub-seg" style="margin-bottom:6px;">
         <button class="sub-btn ${state.sheetTab === 'summary' ? 'active' : ''}" data-sheet-tab="summary" type="button">Resumen${totalScoring ? ` (${totalScoring})` : ''}</button>
@@ -1053,7 +1086,7 @@
         <div class="kpi-cell"><div class="kpi-num" style="font-size:1.25rem;">${esc(club.division)}</div><div class="kpi-label">División 2026</div></div>
         <div class="kpi-cell"><div class="kpi-num accent" style="font-size:1.25rem;">${club.standingsPos ? `#${club.standingsPos} · ${club.pts} pts` : 'Afiliado'}</div><div class="kpi-label">${club.standingsPos ? `${club.won}G - ${club.lost}P` : 'URBA Oficial'}</div></div>
         <div class="kpi-cell"><div class="kpi-num" style="font-size:1.15rem;">${esc(club.cancha || 'Buenos Aires')}</div><div class="kpi-label">Cancha</div></div>
-        <div class="kpi-cell"><div class="kpi-num" style="font-size:1.15rem;">${esc(dirMatch && dirMatch.coach ? dirMatch.coach : (club.sede || 'Buenos Aires'))}</div><div class="kpi-label">${dirMatch && dirMatch.coach ? 'Entrenador' : 'Sede Social'}</div></div>
+        <div class="kpi-cell"><div class="kpi-num" style="font-size:1.15rem;">${esc(dirMatch && cleanCoach(dirMatch.coach) ? cleanCoach(dirMatch.coach) : (club.sede || 'Buenos Aires'))}</div><div class="kpi-label">${dirMatch && cleanCoach(dirMatch.coach) ? 'Entrenador' : 'Sede Social'}</div></div>
       </div>
       ${clubMatches.length ? `
         <div class="sheet-section">
@@ -1080,7 +1113,7 @@
         <button class="action-btn" data-close-sheet="1" type="button">Cerrar</button>
       </div>
       <div class="kpi-strip" style="margin-bottom:14px;">
-        <div class="kpi-cell"><div class="kpi-num" style="font-size:1.15rem;">${esc(t.coach || 'Oficial')}</div><div class="kpi-label">Head Coach</div></div>
+        <div class="kpi-cell"><div class="kpi-num" style="font-size:1.15rem;">${esc(cleanCoach(t.coach) || 'Oficial')}</div><div class="kpi-label">Head Coach</div></div>
         <div class="kpi-cell"><div class="kpi-num" style="font-size:1.15rem;">${esc(t.stadium || 'Sede oficial')}</div><div class="kpi-label">Estadio</div></div>
         <div class="kpi-cell"><div class="kpi-num accent" style="font-size:1.25rem;">${t.worldRank ? `#${t.worldRank}` : 'Club'}</div><div class="kpi-label">${t.worldRank ? 'World Rugby Rank' : 'Competencia'}</div></div>
         <div class="kpi-cell"><div class="kpi-num sky" style="font-size:1.25rem;">${t.roster && t.roster.length ? t.roster.length : '—'}</div><div class="kpi-label">Jugadores en plantel</div></div>

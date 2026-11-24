@@ -119,7 +119,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 32px;
+      gap: 12px;
     }
     .brand {
       display: inline-flex;
@@ -152,6 +152,7 @@
       gap: 24px;
     }
     @media (min-width: 860px) {
+      .topbar-inner { gap: 32px; }
       .top-nav { display: flex; }
     }
     .top-nav-link {
@@ -272,7 +273,7 @@
       font-family: var(--font-display);
       font-size: clamp(2rem, 3.8vw, 3.1rem);
       font-weight: 800;
-      line-height: 0.98;
+      line-height: 1.05;
       letter-spacing: 0.01em;
       text-wrap: balance;
       color: #ffffff;
@@ -1210,6 +1211,72 @@
       transform: translateY(-1px);
     }
 
+
+    /* Responsive Modal Scoreboard & Overflow Guards v3.1.1 */
+    .sheet-head > div:first-child { min-width: 0; flex: 1; }
+    .sheet-head > button { flex-shrink: 0; }
+    .kpi-num { overflow-wrap: anywhere; }
+    .player-row > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+    .player-row > span:last-child { flex-shrink: 0; text-align: right; max-width: 46%; }
+    .sheet-scorebar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+      align-items: center;
+      gap: 10px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px 12px;
+      margin-bottom: 12px;
+    }
+    .sheet-score-team {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 6px;
+      min-width: 0;
+    }
+    .sheet-score-name {
+      font-weight: 700;
+      font-size: 0.88rem;
+      line-height: 1.22;
+      color: var(--text);
+      overflow-wrap: anywhere;
+    }
+    .sheet-score-center {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 0 4px;
+      flex-shrink: 0;
+    }
+    .sheet-score-val {
+      font-family: var(--font-display);
+      font-size: clamp(1.18rem, 3.6vw, 1.85rem);
+      font-weight: 800;
+      line-height: 1.05;
+      color: var(--gold);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .sheet-score-sub {
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      font-weight: 600;
+      color: var(--text-dim);
+      margin-top: 3px;
+      white-space: nowrap;
+    }
+    @media (min-width: 580px) {
+      .sheet-scorebar { padding: 14px 18px; gap: 16px; }
+      .sheet-score-team.home { flex-direction: row; text-align: left; }
+      .sheet-score-team.away { flex-direction: row-reverse; text-align: right; }
+      .sheet-score-name { font-size: 0.96rem; }
+    }
+
   </style>
 </head>
 <body>
@@ -1268,6 +1335,6 @@
     <div id="detailPanel" class="sheet-panel"></div>
   </div>
 
-  <script src="./app.js?v=3.1.0"></script>
+  <script src="./app.js?v=3.1.1"></script>
 </body>
 </html>

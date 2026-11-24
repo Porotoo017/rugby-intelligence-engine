@@ -324,9 +324,10 @@ def parse_wiki_coach_and_crest(wiki_title: str) -> tuple[str | None, str | None,
                 continue
             if not coach and any(x in k for x in ("coach", "head coach", "director of rugby", "entrenador")):
                 if "some say" in val.lower(): val = val.split("Some say")[0].strip()
-                coach = val[:60]
+                if val.lower() not in ("vacant", "tbc", "tba", "none"):
+                    coach = re.sub(r"\s*\[[^\]]*\]", "", val).strip()[:60]
             if not stadium and any(x in k for x in ("ground", "stadium", "home ground", "estadio")):
-                stadium = val[:100]
+                stadium = re.sub(r"\s+\)", ")", re.sub(r"\s*\[[^\]]*\]", "", val)).strip()[:100]
     return coach, crest, stadium
 
 
@@ -654,7 +655,7 @@ def parse_world_rugby_matches(now_utc: dt.datetime) -> list[dict]:
                 "leagueId": sport or "wr",
                 "leagueName": ev_label,
                 "leagueShort": ev_label.replace("Men's Sevens Series 2027", "SVNS 7s M").replace("Women's Sevens Series 2027", "SVNS 7s F"),
-                "phase": m.get("eventPhase") or "",
+                "phase": re.sub(r"\bPool\s+Pool\b", "Pool", str(m.get("eventPhase") or "")).strip(),
                 "group": group,
                 "sport": sport,
                 "status": status,
@@ -923,7 +924,9 @@ def apply_team_meta_and_log(matches: list[dict], conn: sqlite3.Connection, ranki
             if flag_u:
                 tm["flagUrl"] = flag_u
             if not tm.get("coach") and info.get("coach"):
-                tm["coach"] = info["coach"]
+                c_val = re.sub(r"\s*\[[^\]]*\]", "", str(info["coach"])).strip()
+                if c_val.lower() not in ("vacant", "tbc", "tba", "none", "n/a", "-"):
+                    tm["coach"] = c_val
             if nk in rk_men_map:
                 tm["worldRank"] = rk_men_map[nk]
             elif base_nk in rk_men_map:
@@ -1010,8 +1013,8 @@ def apply_team_meta_and_log(matches: list[dict], conn: sqlite3.Connection, ranki
             "name": info["name"],
             "crestUrl": cu,
             "flagUrl": flag_u,
-            "coach": info.get("coach") or "",
-            "stadium": info.get("stadium") or "",
+            "coach": "" if str(info.get("coach") or "").strip().lower() in ("vacant", "tbc", "tba", "none") else re.sub(r"\s*\[[^\]]*\]", "", str(info.get("coach") or "")).strip(),
+            "stadium": re.sub(r"\s{2,}", " ", re.sub(r"\s+\)", ")", re.sub(r"\s*\[[^\]]*\]", "", str(info.get("stadium") or "")))).strip(),
             "worldRank": rk_men_map.get(nk),
             "groups": grps,
             "leagues": lgs,
