@@ -1,5 +1,5 @@
 # Rugby Intelligence Pro — Sync Report
 
-- Generated: `Mar 24 Nov · 04:43 ART`
+- Generated: `Mar 24 Nov · 07:25 ART`
 - Total Matches: **362** (`live: 0`, `scheduled: 267`, `finished: 95`)
-- History DB: **95** logged matches | **57** team rosters | **268** verified crests
+- History DB: **95** logged matches | **59** team rosters | **372** verified crests

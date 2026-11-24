@@ -1,0 +1,340 @@
+"""Registro oficial y verificado de escudos de clubes, uniones y banderas nacionales."""
+import re
+
+BROKEN_ESPN_IDS = {
+    "25899", "25912", "25920", "25943", "25948",
+    "289216", "289220", "289228", "289247", "289320",
+    "289322", "289334", "289460", "289469", "289534", "289841",
+}
+
+COUNTRY_ISO2 = {
+    "albania": "al",
+    "andorra": "ad",
+    "argentina": "ar",
+    "australia": "au",
+    "austria": "at",
+    "bahamas": "bs",
+    "barbados": "bb",
+    "belgium": "be",
+    "bermuda": "bm",
+    "brazil": "br",
+    "brasil": "br",
+    "bulgaria": "bg",
+    "burundi": "bi",
+    "canada": "ca",
+    "cayman islands": "ky",
+    "chile": "cl",
+    "china": "cn",
+    "chinese taipei": "tw",
+    "colombia": "co",
+    "cook islands": "ck",
+    "croatia": "hr",
+    "czechia": "cz",
+    "czech republic": "cz",
+    "denmark": "dk",
+    "england": "gb-eng",
+    "fiji": "fj",
+    "finland": "fi",
+    "france": "fr",
+    "georgia": "ge",
+    "germany": "de",
+    "great britain": "gb",
+    "gb": "gb",
+    "guyana": "gy",
+    "hong kong": "hk",
+    "hong kong china": "hk",
+    "hungary": "hu",
+    "india": "in",
+    "ireland": "ie",
+    "israel": "il",
+    "italy": "it",
+    "ivory coast": "ci",
+    "jamaica": "jm",
+    "japan": "jp",
+    "kazakhstan": "kz",
+    "kenya": "ke",
+    "korea": "kr",
+    "south korea": "kr",
+    "latvia": "lv",
+    "lithuania": "lt",
+    "luxembourg": "lu",
+    "madagascar": "mg",
+    "malaysia": "my",
+    "malta": "mt",
+    "mexico": "mx",
+    "moldova": "md",
+    "morocco": "ma",
+    "namibia": "na",
+    "netherlands": "nl",
+    "new zealand": "nz",
+    "norway": "no",
+    "papua new guinea": "pg",
+    "paraguay": "py",
+    "peru": "pe",
+    "philippines": "ph",
+    "poland": "pl",
+    "portugal": "pt",
+    "romania": "ro",
+    "russia": "ru",
+    "rwanda": "rw",
+    "samoa": "ws",
+    "scotland": "gb-sct",
+    "serbia": "rs",
+    "singapore": "sg",
+    "slovakia": "sk",
+    "south africa": "za",
+    "spain": "es",
+    "sri lanka": "lk",
+    "sweden": "se",
+    "switzerland": "ch",
+    "thailand": "th",
+    "tonga": "to",
+    "trinidad and tobago": "tt",
+    "tunisia": "tn",
+    "uae": "ae",
+    "united arab emirates": "ae",
+    "uganda": "ug",
+    "ukraine": "ua",
+    "uruguay": "uy",
+    "usa": "us",
+    "united states": "us",
+    "wales": "gb-wls",
+    "brython thunder": "gb-wls",
+    "gwalia lightning": "gb-wls",
+    "clovers": "ie",
+    "wolfhounds": "ie",
+    "biella rugby club": "it",
+    "fiamme oro rugby": "it",
+    "rangers rugby vicenza": "it",
+    "rugby mogliano": "it",
+    "rugby parabiago 1948": "it",
+    "skyactivs hiroshima": "jp",
+    "zimbabwe": "zw",
+    # Franquicias nacionales / selecciones especiales
+    "pampas": "ar",
+    "dogos xv": "ar",
+    "tarucas": "ar",
+    "jaguares": "ar",
+    "penarol": "uy",
+    "selknam": "cl",
+    "yacare xv": "py",
+    "cobras brasil rugby": "br",
+    "british irish lions": "gb",
+    "british & irish lions": "gb",
+}
+
+CREST_FALLBACK_ALIASES = {
+    "benetton rugby": "benetton treviso",
+    "cardiff rugby": "cardiff blues",
+    "rc toulonnais": "toulon",
+    "stade toulousain": "toulouse",
+    "stade francais": "stade francais paris",
+    "union bordeaux begles": "bordeaux begles",
+    "section paloise": "pau",
+    "montpellier herault": "montpellier",
+    "aviron bayonnais": "bayonne",
+    "exeter chiefs women": "exeter chiefs",
+    "gloucester-hartpury women": "gloucester rugby",
+    "harlequins women": "harlequins",
+    "leicester tigers women": "leicester tigers",
+    "sale sharks women": "sale sharks",
+    "saracens women": "saracens",
+    "bristol bears women": "bristol bears",
+    "bristol rugby": "bristol bears",
+    "trailfinders women": "ealing trailfinders",
+    "newcastle red bulls": "newcastle falcons",
+    "south africa 7s": "south africa",
+    "south africa women": "south africa",
+    "south africa women 7s": "south africa",
+    "new zealand 7s": "new zealand",
+    "new zealand women": "new zealand",
+    "new zealand women 7s": "new zealand",
+    "ireland 7s": "ireland",
+    "ireland women": "ireland",
+    "ireland women 7s": "ireland",
+    "australia 7s": "australia",
+    "australia women": "australia",
+    "australia women 7s": "australia",
+    "argentina 7s": "argentina",
+    "argentina women 7s": "argentina",
+    "england 7s": "england",
+    "england women": "england",
+    "france 7s": "france",
+    "france women": "france",
+    "france women 7s": "france",
+    "fiji 7s": "fiji",
+    "fiji women 7s": "fiji",
+    "usa 7s": "usa",
+    "usa women": "usa",
+    "usa women 7s": "usa",
+    "canada 7s": "canada",
+    "canada women": "canada",
+    "canada women 7s": "canada",
+    "great britain 7s": "great britain",
+    "great britain women 7s": "great britain",
+    "japan 7s": "japan",
+    "japan women 7s": "japan",
+    "spain 7s": "spain",
+    "spain women 7s": "spain",
+    "samoa 7s": "samoa",
+    "kenya 7s": "kenya",
+    "uruguay 7s": "uruguay",
+    "chile 7s": "chile",
+    "brazil 7s": "brazil",
+    "brazil women 7s": "brazil",
+    "hong kong china 7s": "hong kong china",
+    "hong kong china women 7s": "hong kong china",
+    "poland 7s": "poland",
+    "zimbabwe 7s": "zimbabwe",
+    "china 7s": "china 7s",
+    "colombia 7s": "colombia 7s",
+    "mexico 7s": "mexico 7s",
+    "uganda 7s": "uganda 7s",
+    "scotland women": "scotland",
+    "wales women": "wales",
+    "italy women": "italy",
+}
+
+VERIFIED_CREST_MAP = {
+    "bayonne": "https://thumb.wikimedia.org/wikipedia/en/thumb/b/ba/AvironBayonnaisLogo2022.svg/250px-AvironBayonnaisLogo2022.svg.png",
+    "aviron bayonnais": "https://thumb.wikimedia.org/wikipedia/en/thumb/b/ba/AvironBayonnaisLogo2022.svg/250px-AvironBayonnaisLogo2022.svg.png",
+    "bristol rugby": "https://thumb.wikimedia.org/wikipedia/en/thumb/0/02/Bristol_Bears_logo.svg/250px-Bristol_Bears_logo.svg.png",
+    "bristol bears": "https://thumb.wikimedia.org/wikipedia/en/thumb/0/02/Bristol_Bears_logo.svg/250px-Bristol_Bears_logo.svg.png",
+    "edinburgh rugby": "https://thumb.wikimedia.org/wikipedia/en/thumb/e/e3/Edinburgh_Rugby_logo_2018.svg/250px-Edinburgh_Rugby_logo_2018.svg.png",
+    "zebre rugby": "https://thumb.wikimedia.org/wikipedia/en/thumb/5/5d/Zebre_parma_logo23.png/250px-Zebre_parma_logo23.png",
+    "zebre parma": "https://thumb.wikimedia.org/wikipedia/en/thumb/5/5d/Zebre_parma_logo23.png/250px-Zebre_parma_logo23.png",
+    "newcastle red bulls": "https://upload.wikimedia.org/wikipedia/en/8/80/Newcastle_Red_Bulls_logo.png",
+    "black lion": "https://thumb.wikimedia.org/wikipedia/en/thumb/f/f3/Black_lion_rugby_logo.png/250px-Black_lion_rugby_logo.png",
+    "old glory dc": "https://thumb.wikimedia.org/wikipedia/en/thumb/3/38/Old_Glory_DC_logo.svg/250px-Old_Glory_DC_logo.svg.png",
+    "dallas jackals": "https://thumb.wikimedia.org/wikipedia/en/thumb/b/b1/Dallas_Jackals_logo.png/250px-Dallas_Jackals_logo.png",
+    "otago": "https://thumb.wikimedia.org/wikipedia/en/thumb/4/45/Logo_Otago_Rugby_Union.svg/250px-Logo_Otago_Rugby_Union.svg.png",
+    "wellington": "https://thumb.wikimedia.org/wikipedia/en/thumb/a/ac/Logo_Wellington_Rugby_Union.svg/250px-Logo_Wellington_Rugby_Union.svg.png",
+    "ealing trailfinders": "https://thumb.wikimedia.org/wikipedia/en/thumb/f/f3/Trailfinders_rfc_logo.png/250px-Trailfinders_rfc_logo.png",
+    "agen": "https://thumb.wikimedia.org/wikipedia/en/thumb/2/26/LogoSUAgen2020.svg/250px-LogoSUAgen2020.svg.png",
+    "aurillac": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c0/Stade_Aurillacois_Logo.svg/250px-Stade_Aurillacois_Logo.svg.png",
+    "beziers": "https://upload.wikimedia.org/wikipedia/commons/2/2f/ASBH.jpg",
+    "biarritz olympique": "https://thumb.wikimedia.org/wikipedia/en/thumb/e/e7/Biarritz_olympique_badge.png/250px-Biarritz_olympique_badge.png",
+    "ca brive": "https://thumb.wikimedia.org/wikipedia/en/thumb/8/80/CABriveRugbyLogo.svg/250px-CABriveRugbyLogo.svg.png",
+    "colomiers": "https://thumb.wikimedia.org/wikipedia/en/thumb/5/54/Colomiers_rugby_badge.png/250px-Colomiers_rugby_badge.png",
+    "fc grenoble": "https://upload.wikimedia.org/wikipedia/en/1/13/FC_Grenoble.gif",
+    "narbonne": "https://thumb.wikimedia.org/wikipedia/en/thumb/4/4d/RC_Narbonne_logo.png/250px-RC_Narbonne_logo.png",
+    "nice": "https://thumb.wikimedia.org/wikipedia/en/thumb/2/20/Nissa_Rugby_logo.png/250px-Nissa_Rugby_logo.png",
+    "oyonnax rugby": "https://thumb.wikimedia.org/wikipedia/en/thumb/b/bb/OyonnaxRugby2018logo.svg/250px-OyonnaxRugby2018logo.svg.png",
+    "provence rugby": "https://thumb.wikimedia.org/wikipedia/en/thumb/e/e7/Logo_Provence_Rugby_2015.png/250px-Logo_Provence_Rugby_2015.png",
+    "soyaux angouleme": "https://thumb.wikimedia.org/wikipedia/en/thumb/7/7a/SA_XV_Charente_Rugby_logo_2014.png/250px-SA_XV_Charente_Rugby_logo_2014.png",
+    "us dax": "https://upload.wikimedia.org/wikipedia/en/7/77/US_Dax_logo.png",
+    "us montauban": "https://thumb.wikimedia.org/wikipedia/en/thumb/3/3f/Us_montauban.png/250px-Us_montauban.png",
+    "uson nevers": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/fe/Logo_USO_Nevers_2016.png/250px-Logo_USO_Nevers_2016.png",
+    "valence romans": "https://thumb.wikimedia.org/wikipedia/en/thumb/5/5b/Valence_Romans_logo.png/250px-Valence_Romans_logo.png",
+    "ampthill": "https://upload.wikimedia.org/wikipedia/en/0/0e/Ampthill_RC_logo.png",
+    "bedford blues": "https://thumb.wikimedia.org/wikipedia/en/thumb/e/e8/Bedford_Blues_logo.svg/250px-Bedford_Blues_logo.svg.png",
+    "blackheath": "https://upload.wikimedia.org/wikipedia/en/2/20/Blackheath_rfc_logo.png",
+    "caldy": "https://upload.wikimedia.org/wikipedia/en/7/77/Caldy-rugby-football-club.png",
+    "chinnor": "https://upload.wikimedia.org/wikipedia/en/c/c0/Chinnor_rfc_logo.png",
+    "cornish pirates": "https://thumb.wikimedia.org/wikipedia/en/thumb/f/fd/Cornish_Pirates_logo.svg/250px-Cornish_Pirates_logo.svg.png",
+    "coventry": "https://thumb.wikimedia.org/wikipedia/en/thumb/6/66/CoventryRFCLogo.svg/250px-CoventryRFCLogo.svg.png",
+    "doncaster knights": "https://thumb.wikimedia.org/wikipedia/en/thumb/6/6a/Doncaster_Knights_logo.png/250px-Doncaster_Knights_logo.png",
+    "hartpury university rfc": "https://thumb.wikimedia.org/wikipedia/en/thumb/3/37/Hartpury_College_R.F.C.png/250px-Hartpury_College_R.F.C.png",
+    "nottingham": "https://thumb.wikimedia.org/wikipedia/en/thumb/1/1c/Nottingham_rugby_logo.png/250px-Nottingham_rugby_logo.png",
+    "richmond": "https://thumb.wikimedia.org/wikipedia/en/thumb/7/7f/Richmond_rugby_logo.png/250px-Richmond_rugby_logo.png",
+    "rotherham titans": "https://thumb.wikimedia.org/wikipedia/en/thumb/3/32/Titans_rugby_logo.png/250px-Titans_rugby_logo.png",
+    "worcester warriors": "https://thumb.wikimedia.org/wikipedia/en/thumb/f/f2/Worcester_Warriors_logo.svg/250px-Worcester_Warriors_logo.svg.png",
+    "petrarca rugby": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e0/Stadio_Plebiscito.jpeg/250px-Stadio_Plebiscito.jpeg",
+    "black rams tokyo": "https://upload.wikimedia.org/wikipedia/en/b/bc/Black_Rams_Tokyo_logo.jpg",
+    "kobelco kobe steelers": "https://thumb.wikimedia.org/wikipedia/en/thumb/6/69/Kobelco_Kobe_Steelers_logo.jpg/250px-Kobelco_Kobe_Steelers_logo.jpg",
+    "kubota spears": "https://thumb.wikimedia.org/wikipedia/en/thumb/f/f3/Kubota_Spears_Funabashi_Tokyo_Bay_logo.jpg/250px-Kubota_Spears_Funabashi_Tokyo_Bay_logo.jpg",
+    "mie honda heat": "https://thumb.wikimedia.org/wikipedia/en/thumb/e/e9/Mie_Honda_Heat_logo.jpg/250px-Mie_Honda_Heat_logo.jpg",
+    "mitsubishi sagamihara dynaboars": "https://thumb.wikimedia.org/wikipedia/en/thumb/e/e9/Mitsubishi_Sagamihara_DynaBoars_logo.jpg/250px-Mitsubishi_Sagamihara_DynaBoars_logo.jpg",
+    "saitama wild knights": "https://thumb.wikimedia.org/wikipedia/en/thumb/e/e1/Panasonic_Wild_Knights_logo.gif/250px-Panasonic_Wild_Knights_logo.gif",
+    "shizuoka blue revs": "https://thumb.wikimedia.org/wikipedia/en/thumb/4/40/Shizuoka_Blue_Revs_logo.svg/250px-Shizuoka_Blue_Revs_logo.svg.png",
+    "tokyo sungoliath": "https://thumb.wikimedia.org/wikipedia/en/thumb/0/0f/Tokyo_Sungoliath_logo.jpg/250px-Tokyo_Sungoliath_logo.jpg",
+    "toshiba brave lupus": "https://thumb.wikimedia.org/wikipedia/en/thumb/8/81/Brave_Lupus_logo.svg/250px-Brave_Lupus_logo.svg.png",
+    "toyota verblitz": "https://thumb.wikimedia.org/wikipedia/en/thumb/4/42/Toyota_Verblitz_team_logo.png/250px-Toyota_Verblitz_team_logo.png",
+    "urayasu d-rocks": "https://thumb.wikimedia.org/wikipedia/en/thumb/7/7c/Logo_for_the_Urayasu_D-Rocks_rugby_union_team.png/250px-Logo_for_the_Urayasu_D-Rocks_rugby_union_team.png",
+    "yokohama canon eagles": "https://thumb.wikimedia.org/wikipedia/en/thumb/6/69/Yokohama_Canon_Eagles_logo.svg/250px-Yokohama_Canon_Eagles_logo.svg.png",
+    "hanazono kinetsu liners": "https://thumb.wikimedia.org/wikipedia/en/thumb/0/0c/Hanazono_Kintetsu_Liners_logo.svg/250px-Hanazono_Kintetsu_Liners_logo.svg.png",
+    "red hurricanes osaka": "https://thumb.wikimedia.org/wikipedia/en/thumb/8/82/NTT_DoCoMo_Red_Hurricanes_Osaka_logo.jpg/250px-NTT_DoCoMo_Red_Hurricanes_Osaka_logo.jpg",
+    "shimizu blue sharks": "https://thumb.wikimedia.org/wikipedia/en/thumb/7/7b/Shimizu_Koto_Blue_Sharks_logo_JRLO.svg/250px-Shimizu_Koto_Blue_Sharks_logo_JRLO.svg.png",
+    "toyota industries shuttles": "https://thumb.wikimedia.org/wikipedia/en/thumb/0/0d/Toyota_Industries_Shuttles_Aichi_logo.jpg/250px-Toyota_Industries_Shuttles_Aichi_logo.jpg",
+    "kyushudenryoku kyuden voltex": "https://thumb.wikimedia.org/wikipedia/en/thumb/1/18/Kyuden_Voltex_logo.svg/250px-Kyuden_Voltex_logo.svg.png",
+    "kawagoe sayama secom": "https://thumb.wikimedia.org/wikipedia/en/thumb/2/2a/Secom_Rugguts_logo.svg/250px-Secom_Rugguts_logo.svg.png",
+    "belgium": "https://thumb.wikimedia.org/wikipedia/en/thumb/8/85/Belgium_national_rugby_union_team.png/250px-Belgium_national_rugby_union_team.png",
+    "netherlands": "https://thumb.wikimedia.org/wikipedia/en/thumb/d/d9/Netherlands_rugby_badge.png/250px-Netherlands_rugby_badge.png",
+    "germany": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/0b/Germany_vs_Belgium_rugby_match.jpg/250px-Germany_vs_Belgium_rugby_match.jpg",
+    "poland": "https://thumb.wikimedia.org/wikipedia/en/thumb/f/ff/Poland_Rugby.svg/250px-Poland_Rugby.svg.png",
+    "switzerland": "https://upload.wikimedia.org/wikipedia/en/3/36/Swiss_Rugby_Logo.png",
+    "sweden": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/b9/Swedish_Rugby_Union_logo.svg/250px-Swedish_Rugby_Union_logo.svg.png",
+    "denmark": "https://upload.wikimedia.org/wikipedia/en/0/0a/Dru-logo.jpg",
+    "lithuania": "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/dd/Coat_of_arms_of_Lithuania.svg/250px-Coat_of_arms_of_Lithuania.svg.png",
+    "austria": "https://upload.wikimedia.org/wikipedia/en/0/0b/Austria_rugby_logo.png",
+    "slovakia": "https://thumb.wikimedia.org/wikipedia/en/thumb/5/59/Logo_Slovak_Rugby-3.jpg/250px-Logo_Slovak_Rugby-3.jpg",
+    "zimbabwe": "https://upload.wikimedia.org/wikipedia/en/a/a5/Zimbabwe_National_Rugby_Union_Team_Logo.png",
+    "kenya": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/49/Flag_of_Kenya.svg/250px-Flag_of_Kenya.svg.png",
+    "kazakhstan": "https://thumb.wikimedia.org/wikipedia/en/thumb/6/6b/Kazakhstanrugbylogo.jpg/250px-Kazakhstanrugbylogo.jpg",
+    "peru": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/cf/Flag_of_Peru.svg/250px-Flag_of_Peru.svg.png",
+    "rugby rovigo delta": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/22/Stadio_Mario_Battaglini%2C_tribuna_Quaglio.jpg/250px-Stadio_Mario_Battaglini%2C_tribuna_Quaglio.jpg",
+    "sitav rugby lyons piacenza": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/2b/Stadio_Beltrametti.jpg/250px-Stadio_Beltrametti.jpg",
+    "valorugby emilia": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/26/Reggio_Emilia%2C_Stadio_Mirabello%2C_2010.jpg/250px-Reggio_Emilia%2C_Stadio_Mirabello%2C_2010.jpg",
+    "viadana rugby": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/31/Stadio_Zaffanella_%22Aironi%22_-_panoramio.jpg/250px-Stadio_Zaffanella_%22Aironi%22_-_panoramio.jpg",
+    "malta": "https://upload.wikimedia.org/wikipedia/en/7/78/Malta_Rugby_Football_Union_Logo.jpg",
+    "china 7s": "https://thumb.wikimedia.org/wikipedia/en/thumb/d/d8/Chinese_Rugby_Football_Association.jpg/250px-Chinese_Rugby_Football_Association.jpg",
+    "mexico 7s": "https://thumb.wikimedia.org/wikipedia/en/thumb/0/07/Mexicorugby.png/250px-Mexicorugby.png",
+    "loughborough lightning": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/f7/Shield_of_Loughborough_University.svg/250px-Shield_of_Loughborough_University.svg.png",
+    "green warriors tokatsu": "https://thumb.wikimedia.org/wikipedia/en/thumb/7/76/NEC_Green_Rockets_Tokatsu_logo.svg/250px-NEC_Green_Rockets_Tokatsu_logo.svg.png",
+    "bristol bears women": "https://thumb.wikimedia.org/wikipedia/en/thumb/0/02/Bristol_Bears_logo.svg/250px-Bristol_Bears_logo.svg.png",
+    "trailfinders women": "https://thumb.wikimedia.org/wikipedia/en/thumb/f/f3/Trailfinders_rfc_logo.png/250px-Trailfinders_rfc_logo.png"
+}
+
+
+def strip_team_suffix(nk: str) -> str:
+    s = re.sub(r"\s+(women\s+7s|women|7s)$", "", nk).strip()
+    return s
+
+
+def get_country_flag_url(nk: str) -> str:
+    if nk in COUNTRY_ISO2:
+        return f"https://flagcdn.com/w80/{COUNTRY_ISO2[nk]}.png"
+    base = strip_team_suffix(nk)
+    if base in COUNTRY_ISO2:
+        return f"https://flagcdn.com/w80/{COUNTRY_ISO2[base]}.png"
+    return ""
+
+
+def is_broken_crest(url: str, nk: str = "") -> bool:
+    if not url:
+        return True
+    if "countries/500/usa" in url and "usa" not in nk:
+        return True
+    for bad_id in BROKEN_ESPN_IDS:
+        if f"/{bad_id}.png" in url:
+            return True
+    return False
+
+
+def resolve_crest_url(nk: str, current_url: str, meta_map: dict) -> str:
+    if current_url and not is_broken_crest(current_url, nk):
+        return current_url
+
+    candidates = [nk]
+    if nk in CREST_FALLBACK_ALIASES:
+        candidates.append(CREST_FALLBACK_ALIASES[nk])
+    base = strip_team_suffix(nk)
+    if base and base not in candidates:
+        candidates.append(base)
+    if base in CREST_FALLBACK_ALIASES:
+        candidates.append(CREST_FALLBACK_ALIASES[base])
+
+    for cand in candidates:
+        u = VERIFIED_CREST_MAP.get(cand, "")
+        if u:
+            return u
+        m_info = meta_map.get(cand) or {}
+        mu = m_info.get("crestUrl") or ""
+        if mu and not is_broken_crest(mu, cand):
+            return mu
+
+    # Último respaldo oficial para selecciones sin logo ESPN/Wiki: bandera nacional oficial
+    iso = COUNTRY_ISO2.get(nk) or COUNTRY_ISO2.get(base)
+    if iso:
+        return f"https://flagcdn.com/w160/{iso}.png"
+    return ""

@@ -20,6 +20,11 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
+try:
+    from crests_registry import get_country_flag_url, is_broken_crest, resolve_crest_url
+except ImportError:
+    from engine.crests_registry import get_country_flag_url, is_broken_crest, resolve_crest_url
+
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DATA_DIR = os.path.join(ROOT, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -910,14 +915,19 @@ def apply_team_meta_and_log(matches: list[dict], conn: sqlite3.Connection, ranki
         for side in ("home", "away"):
             tm = m[side]
             nk = norm_key(tm["name"])
-            base_nk = re.sub(r"\s+7s$", "", nk)
+            base_nk = re.sub(r"\s+(women\s+7s|women|7s)$", "", nk).strip()
             info = meta_map.get(nk) or meta_map.get(base_nk) or {}
-            if (not tm.get("crestUrl") or ("countries/500/usa" in str(tm.get("crestUrl")) and "usa" not in nk) or "25912.png" in str(tm.get("crestUrl"))) and info.get("crestUrl") and not ("countries/500/usa" in info["crestUrl"] and "usa" not in nk):
-                tm["crestUrl"] = info["crestUrl"]
+            resolved = resolve_crest_url(nk, str(tm.get("crestUrl") or ""), meta_map)
+            tm["crestUrl"] = resolved
+            flag_u = get_country_flag_url(nk)
+            if flag_u:
+                tm["flagUrl"] = flag_u
             if not tm.get("coach") and info.get("coach"):
                 tm["coach"] = info["coach"]
             if nk in rk_men_map:
                 tm["worldRank"] = rk_men_map[nk]
+            elif base_nk in rk_men_map:
+                tm["worldRank"] = rk_men_map[base_nk]
             if not tm["lineup"] and nk in roster_map and roster_map[nk]["lineup"]:
                 tm["probableLineup"] = roster_map[nk]["lineup"]
                 tm["probableFromDate"] = roster_map[nk]["eventDate"][:10]
@@ -970,18 +980,36 @@ def apply_team_meta_and_log(matches: list[dict], conn: sqlite3.Connection, ranki
 
     directory = []
     seen = set()
+    # Asegurar que también entren al directorio los clubes/selecciones de partidos sin fila previa en team_meta
+    for m in matches:
+        for side in ("home", "away"):
+            t_name = m[side]["name"]
+            tnk = norm_key(t_name)
+            if tnk not in meta_map and not any(x in tnk for x in ("pool ", "loser ", "winner ")):
+                cu = resolve_crest_url(tnk, m[side].get("crestUrl") or "", meta_map)
+                if cu:
+                    meta_map[tnk] = {
+                        "name": t_name,
+                        "espnId": m[side].get("espnId") or "",
+                        "crestUrl": cu,
+                        "coach": m[side].get("coach") or "",
+                        "stadium": "",
+                    }
+
     for nk, info in meta_map.items():
-        cu = info.get("crestUrl") or ""
-        if nk in seen or not cu or ("countries/500/usa" in cu and "usa" not in nk) or "25912.png" in cu:
+        cu = resolve_crest_url(nk, info.get("crestUrl") or "", meta_map)
+        if nk in seen or not cu or is_broken_crest(cu, nk):
             continue
         seen.add(nk)
         r_info = roster_map.get(nk)
         grps = sorted(team_groups.get(nk, set()))
         lgs = sorted(team_leagues.get(nk, set()))
+        flag_u = get_country_flag_url(nk)
         directory.append({
             "key": nk,
             "name": info["name"],
             "crestUrl": cu,
+            "flagUrl": flag_u,
             "coach": info.get("coach") or "",
             "stadium": info.get("stadium") or "",
             "worldRank": rk_men_map.get(nk),
@@ -989,7 +1017,7 @@ def apply_team_meta_and_log(matches: list[dict], conn: sqlite3.Connection, ranki
             "leagues": lgs,
             "roster": r_info["lineup"] if r_info else [],
             "rosterUpdated": r_info["eventDate"][:10] if r_info else "",
-            "isArgentina": ("argentina" in nk or nk in ("newman", "hindu", "sic", "casi", "belgrano ac", "cuba", "alumni", "regatas bella vista", "b.a.c.r.c.", "san luis", "champagnat", "club atletico del rosario")),
+            "isArgentina": ("argentina" in nk or nk in ("newman", "hindu", "sic", "casi", "belgrano ac", "cuba", "alumni", "regatas bella vista", "b.a.c.r.c.", "san luis", "champagnat", "club atletico del rosario", "pampas", "dogos xv", "tarucas")),
         })
     directory.sort(key=lambda x: (0 if x["isArgentina"] else 1, x["worldRank"] or 999, 0 if x["roster"] else 1, x["name"]))
     return directory, new_logged
@@ -1056,9 +1084,10 @@ def fetch_wiki_urba_venues() -> dict[str, dict]:
 def urba_crest(img_uri: str | None) -> str:
     if not img_uri:
         return ""
-    if img_uri.startswith("http"):
-        return clean_url(img_uri)
-    return "https://urbaimagenes-cddyfadwc8dqcchn.z03.azurefd.net/" + img_uri.lstrip("/")
+    uri = img_uri.replace("ñ", "n").replace("Ñ", "N")
+    if uri.startswith("http"):
+        return clean_url(uri)
+    return "https://urbaimagenes-cddyfadwc8dqcchn.z03.azurefd.net/" + uri.lstrip("/")
 
 
 def fetch_urba_official_data(conn: sqlite3.Connection) -> tuple[dict, list[dict]]:
@@ -1071,7 +1100,7 @@ def fetch_urba_official_data(conn: sqlite3.Connection) -> tuple[dict, list[dict]
         name = str(c.get("name") or "").strip()
         if not cid or not name:
             continue
-        crest = clean_url(c.get("image_uri_with_base_url") or urba_crest(c.get("image_uri")))
+        crest = urba_crest(c.get("image_uri_with_base_url") or c.get("image_uri"))
         nk = norm_key(name)
         URBA_ALIASES = {
             "casi": "club atletico de san isidro",
@@ -1400,10 +1429,12 @@ def main() -> None:
     enrich_team_meta_from_wiki(conn, names_to_enrich, team_index)
 
     rankings = fetch_rankings()
-    meta_rows = {r[0]: r[1] for r in conn.execute("SELECT team_key, crest_url FROM team_meta").fetchall()}
+    meta_rows_map = {r[0]: {"crestUrl": r[1]} for r in conn.execute("SELECT team_key, crest_url FROM team_meta").fetchall()}
     for cat in ("men", "women"):
         for r in rankings.get(cat, []):
-            r["crestUrl"] = meta_rows.get(norm_key(r["team"]), "")
+            tnk = norm_key(r["team"])
+            r["crestUrl"] = resolve_crest_url(tnk, meta_rows_map.get(tnk, {}).get("crestUrl", ""), meta_rows_map)
+            r["flagUrl"] = get_country_flag_url(tnk)
 
     teams_dir, new_logged = apply_team_meta_and_log(matches, conn, rankings)
 
