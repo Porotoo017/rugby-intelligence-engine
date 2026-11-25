@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-11-25T13:45:03Z",
+  "updatedAt": "2026-11-25T22:52:29Z",
   "schemaSQL": "CREATE TABLE IF NOT EXISTS competitions (\n    id TEXT PRIMARY KEY,\n    name TEXT NOT NULL,\n    short_name TEXT NOT NULL,\n    region TEXT NOT NULL,\n    category TEXT NOT NULL,\n    group_key TEXT NOT NULL,\n    source TEXT NOT NULL,\n    external_id TEXT,\n    teams_count INTEGER NOT NULL,\n    teams_note TEXT,\n    season_window TEXT NOT NULL,\n    is_argentina_core INTEGER DEFAULT 0,\n    sort_order INTEGER DEFAULT 50,\n    matches_count INTEGER DEFAULT 0,\n    updated_at TEXT\n);",
   "categories": [
     {
