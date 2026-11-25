@@ -33,31 +33,269 @@ OUT_DATA_JSON = os.path.join(DATA_DIR, "rugby_engine_output.json")
 OUT_ROOT_JSON = os.path.join(ROOT, "rugby_engine_output.json")
 OUT_HISTORY_JSON = os.path.join(DATA_DIR, "rugby_teams_history.json")
 OUT_REPORT_MD = os.path.join(ROOT, "REPORT_ACTUAL.md")
+OUT_COMPETITIONS_JSON = os.path.join(DATA_DIR, "rugby_competitions.json")
 
 ARG_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 UTC_TZ = dt.timezone.utc
 USER_AGENT = "RugbyIntelligencePro/1.0 (+https://github.com/Porotoo017/rugby-intelligence-engine)"
 
 ESPN_LEAGUES = [
-    {"id": "289279", "name": "URBA Top 14", "group": "urba", "short": "URBA Top 14"},
-    {"id": "2009", "name": "URBA Primera A", "group": "urba", "short": "URBA 1ª A"},
-    {"id": "17567", "name": "Nations Championship", "group": "nations", "short": "Nations Champ"},
-    {"id": "244293", "name": "The Rugby Championship", "group": "nations", "short": "Rugby Champ"},
-    {"id": "180659", "name": "Six Nations", "group": "nations", "short": "6 Naciones"},
-    {"id": "289234", "name": "International Test Matches", "group": "nations", "short": "Test Match"},
-    {"id": "268565", "name": "British & Irish Lions Tour", "group": "nations", "short": "Lions Tour"},
-    {"id": "164205", "name": "Rugby World Cup", "group": "worldcup", "short": "Mundial RWC"},
-    {"id": "289237", "name": "Women's Rugby World Cup", "group": "worldcup", "short": "Mundial Fem"},
-    {"id": "282", "name": "Olympic Men's 7s", "group": "sevens", "short": "Seven Olímpico"},
-    {"id": "283", "name": "Olympic Women's 7s", "group": "sevens", "short": "Seven Fem"},
-    {"id": "271937", "name": "European Champions Cup", "group": "clubs", "short": "Champions Cup"},
-    {"id": "272073", "name": "European Challenge Cup", "group": "clubs", "short": "Challenge Cup"},
-    {"id": "270559", "name": "French Top 14", "group": "top14", "short": "Top 14"},
-    {"id": "270557", "name": "United Rugby Championship", "group": "clubs", "short": "URC"},
-    {"id": "267979", "name": "Gallagher Premiership", "group": "clubs", "short": "Premiership"},
-    {"id": "242041", "name": "Super Rugby Pacific", "group": "clubs", "short": "Super Rugby"},
-    {"id": "270563", "name": "NPC Mitre 10 Cup", "group": "clubs", "short": "NPC NZ"},
-    {"id": "289262", "name": "Major League Rugby", "group": "clubs", "short": "MLR USA"},
+    {"id": "289279", "name": "URBA Top 14", "group": "urba", "short": "URBA Top 14", "compId": "ar-urba-top14", "category": "Clubes"},
+    {"id": "2009", "name": "URBA Primera A", "group": "urba", "short": "URBA 1ª A", "compId": "ar-urba-top14", "category": "Clubes"},
+    {"id": "17567", "name": "Nations Championship", "group": "nations", "short": "Nations Champ", "compId": "int-nations-tests", "category": "Selecciones"},
+    {"id": "244293", "name": "The Rugby Championship", "group": "nations", "short": "Rugby Champ", "compId": "trc-rugby-championship", "category": "Selecciones"},
+    {"id": "180659", "name": "Six Nations", "group": "nations", "short": "6 Naciones", "compId": "eu-six-nations", "category": "Selecciones"},
+    {"id": "289234", "name": "International Test Matches", "group": "nations", "short": "Test Match", "compId": "int-nations-tests", "category": "Selecciones"},
+    {"id": "268565", "name": "British & Irish Lions Tour", "group": "nations", "short": "Lions Tour", "compId": "int-nations-tests", "category": "Selecciones"},
+    {"id": "164205", "name": "Rugby World Cup", "group": "worldcup", "short": "Mundial RWC", "compId": "rwc-world-cup", "category": "Selecciones"},
+    {"id": "289237", "name": "Women's Rugby World Cup", "group": "worldcup", "short": "Mundial Fem", "compId": "rwc-world-cup", "category": "Selecciones"},
+    {"id": "282", "name": "Olympic Men's 7s", "group": "sevens", "short": "Seven Olímpico", "compId": "wr-svns", "category": "Selecciones"},
+    {"id": "283", "name": "Olympic Women's 7s", "group": "sevens", "short": "Seven Fem", "compId": "wr-svns", "category": "Selecciones"},
+    {"id": "271937", "name": "European Champions Cup", "group": "copas", "short": "Champions Cup", "compId": "epcr-champions-cup", "category": "Copas"},
+    {"id": "272073", "name": "European Challenge Cup", "group": "copas", "short": "Challenge Cup", "compId": "epcr-challenge-cup", "category": "Copas"},
+    {"id": "270559", "name": "French Top 14", "group": "top14", "short": "Top 14 Francia", "compId": "fr-top14", "category": "Clubes"},
+    {"id": "270557", "name": "United Rugby Championship", "group": "clubs", "short": "URC", "compId": "eu-urc", "category": "Clubes"},
+    {"id": "267979", "name": "Gallagher Premiership", "group": "clubs", "short": "Premiership", "compId": "eng-premiership", "category": "Clubes"},
+    {"id": "242041", "name": "Super Rugby Pacific", "group": "clubs", "short": "Super Rugby Pacific", "compId": "oce-super-rugby-pacific", "category": "Clubes"},
+    {"id": "270563", "name": "NPC Mitre 10 Cup", "group": "clubs", "short": "NPC NZ", "compId": "nz-npc", "category": "Clubes"},
+    {"id": "289262", "name": "Major League Rugby", "group": "clubs", "short": "MLR USA", "compId": "us-mlr", "category": "Clubes"},
+]
+
+COMPETITIONS_SCHEMA_SQL = """CREATE TABLE IF NOT EXISTS competitions (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    short_name TEXT NOT NULL,
+    region TEXT NOT NULL,
+    category TEXT NOT NULL,
+    group_key TEXT NOT NULL,
+    source TEXT NOT NULL,
+    external_id TEXT,
+    teams_count INTEGER NOT NULL,
+    teams_note TEXT,
+    season_window TEXT NOT NULL,
+    is_argentina_core INTEGER DEFAULT 0,
+    sort_order INTEGER DEFAULT 50,
+    matches_count INTEGER DEFAULT 0,
+    updated_at TEXT
+);"""
+
+COMPETITIONS_CATALOG = [
+    {
+        "id": "ar-urba-top14",
+        "name": "URBA Top 14 (Buenos Aires)",
+        "shortName": "URBA Top 14",
+        "region": "Buenos Aires, Argentina",
+        "category": "Clubes",
+        "groupKey": "urba",
+        "source": "urba",
+        "externalId": "289279",
+        "teamsCount": 12,
+        "teamsNote": "12 en Top 14 · 99 clubes en 8 divisiones",
+        "season": "Marzo – Noviembre",
+        "isArgentinaCore": True,
+        "sortOrder": 1,
+        "standingsLeagueId": None,
+        "notes": "Base argentina preservada intacta (URBA oficial).",
+    },
+    {
+        "id": "ar-los-pumas",
+        "name": "Los Pumas XV & Los Pumas 7s (UAR)",
+        "shortName": "Los Pumas",
+        "region": "Argentina / Internacional",
+        "category": "Selecciones",
+        "groupKey": "arg",
+        "source": "espn+wr",
+        "externalId": "uar",
+        "teamsCount": 2,
+        "teamsNote": "Selección Mayor XV & Circuito Mundial Seven",
+        "season": "Todo el año (Jul/Ago–Nov & SVNS)",
+        "isArgentinaCore": True,
+        "sortOrder": 2,
+        "standingsLeagueId": None,
+        "notes": "Cobertura completa UAR intacta.",
+    },
+    {
+        "id": "fr-top14",
+        "name": "Top 14 (Ligue Nationale de Rugby)",
+        "shortName": "Top 14 Francia",
+        "region": "Francia",
+        "category": "Clubes",
+        "groupKey": "top14",
+        "source": "espn+wr",
+        "externalId": "270559",
+        "teamsCount": 14,
+        "teamsNote": "14 clubes profesionales de Francia",
+        "season": "Septiembre – Junio",
+        "seasonParam": "2027",
+        "isArgentinaCore": False,
+        "sortOrder": 10,
+        "standingsLeagueId": "270559",
+        "notes": "Diferenciado explícitamente del Top 14 de la URBA (Buenos Aires).",
+    },
+    {
+        "id": "eu-urc",
+        "name": "United Rugby Championship (URC)",
+        "shortName": "URC",
+        "region": "Irlanda, Gales, Escocia, Italia y Sudáfrica",
+        "category": "Clubes",
+        "groupKey": "clubs",
+        "source": "espn+wr",
+        "externalId": "270557",
+        "teamsCount": 16,
+        "teamsNote": "16 franquicias (4 IRL, 4 WAL, 4 RSA, 2 SCO, 2 ITA)",
+        "season": "Septiembre – Junio",
+        "isArgentinaCore": False,
+        "sortOrder": 11,
+        "standingsLeagueId": "270557",
+        "notes": "Liga intercontinental de clubes y franquicias del Hemisferio Norte y Sudáfrica.",
+    },
+    {
+        "id": "eng-premiership",
+        "name": "Premiership Rugby (Gallagher Premiership)",
+        "shortName": "Premiership",
+        "region": "Inglaterra",
+        "category": "Clubes",
+        "groupKey": "clubs",
+        "source": "espn+wr",
+        "externalId": "267979",
+        "teamsCount": 10,
+        "teamsNote": "10 clubes históricos de Inglaterra",
+        "season": "Septiembre – Junio",
+        "isArgentinaCore": False,
+        "sortOrder": 12,
+        "standingsLeagueId": "267979",
+        "notes": "Primera división profesional del rugby inglés.",
+    },
+    {
+        "id": "oce-super-rugby-pacific",
+        "name": "Super Rugby Pacific",
+        "shortName": "Super Rugby Pacific",
+        "region": "Oceanía (NZ, Australia, Fiji, Islas del Pacífico)",
+        "category": "Clubes",
+        "groupKey": "clubs",
+        "source": "espn",
+        "externalId": "242041",
+        "teamsCount": 11,
+        "teamsNote": "11 franquicias (5 NZL, 4 AUS, Fijian Drua, Moana Pasifika)",
+        "season": "Febrero – Junio",
+        "isArgentinaCore": False,
+        "sortOrder": 13,
+        "standingsLeagueId": "242041",
+        "notes": "Máxima competencia de franquicias de Oceanía.",
+    },
+    {
+        "id": "sa-super-rugby-americas",
+        "name": "Súper Rugby Américas (SRA)",
+        "shortName": "Súper Rugby Américas",
+        "region": "Sudamérica (ARG, URU, CHI, PAR, BRA)",
+        "category": "Clubes",
+        "groupKey": "sra",
+        "source": "sudamerica-rugby",
+        "externalId": "regisar-11",
+        "teamsCount": 8,
+        "teamsNote": "8 franquicias (4 ARG, 1 URU, 1 CHI, 1 PAR, 1 BRA)",
+        "season": "Febrero – Junio",
+        "isArgentinaCore": False,
+        "sortOrder": 14,
+        "standingsLeagueId": None,
+        "notes": "Conexión sudamericana oficial: Pampas, Dogos XV, Capibaras XV, Tarucas, Peñarol, Selknam, Yacare XV y Cobras.",
+    },
+    {
+        "id": "epcr-champions-cup",
+        "name": "Investec Champions Cup",
+        "shortName": "Champions Cup",
+        "region": "Europa y Sudáfrica (EPCR)",
+        "category": "Copas",
+        "groupKey": "copas",
+        "source": "espn+wr",
+        "externalId": "271937",
+        "teamsCount": 24,
+        "teamsNote": "24 clasificados (Top 14, URC y Premiership)",
+        "season": "Diciembre – Mayo",
+        "isArgentinaCore": False,
+        "sortOrder": 20,
+        "standingsLeagueId": "271937",
+        "notes": "Máxima copa continental de clubes organizada por EPCR.",
+    },
+    {
+        "id": "epcr-challenge-cup",
+        "name": "EPCR Challenge Cup",
+        "shortName": "Challenge Cup",
+        "region": "Europa, Sudáfrica e Invitados (EPCR)",
+        "category": "Copas",
+        "groupKey": "copas",
+        "source": "espn+wr",
+        "externalId": "272073",
+        "teamsCount": 18,
+        "teamsNote": "18 clubes en 3 grupos + cruces desde Champions Cup",
+        "season": "Diciembre – Mayo",
+        "isArgentinaCore": False,
+        "sortOrder": 21,
+        "standingsLeagueId": "272073",
+        "notes": "Segunda copa continental europea con participación de franquicias sudafricanas e invitadas.",
+    },
+    {
+        "id": "trc-rugby-championship",
+        "name": "The Rugby Championship",
+        "shortName": "Rugby Championship",
+        "region": "Hemisferio Sur — SANZAAR (ARG, NZL, RSA, AUS)",
+        "category": "Selecciones",
+        "groupKey": "nations",
+        "source": "espn",
+        "externalId": "244293",
+        "teamsCount": 4,
+        "teamsNote": "4 potencias del Sur: Los Pumas, All Blacks, Springboks y Wallabies",
+        "season": "Agosto – Octubre",
+        "isArgentinaCore": False,
+        "sortOrder": 30,
+        "standingsLeagueId": "244293",
+        "notes": "Torneo anual del Hemisferio Sur donde compiten Los Pumas.",
+    },
+    {
+        "id": "eu-six-nations",
+        "name": "Torneo de las Seis Naciones (Six Nations)",
+        "shortName": "Seis Naciones",
+        "region": "Europa (ENG, FRA, IRL, SCO, WAL, ITA)",
+        "category": "Selecciones",
+        "groupKey": "nations",
+        "source": "espn+wr",
+        "externalId": "180659",
+        "teamsCount": 6,
+        "teamsNote": "6 selecciones históricas de Europa",
+        "season": "Febrero – Marzo",
+        "isArgentinaCore": False,
+        "sortOrder": 31,
+        "standingsLeagueId": "180659",
+        "notes": "Campeonato anual del Hemisferio Norte.",
+    },
+    {
+        "id": "rwc-world-cup",
+        "name": "Copa del Mundo de Rugby (Rugby World Cup)",
+        "shortName": "Mundial RWC",
+        "region": "Mundial (World Rugby)",
+        "category": "Selecciones",
+        "groupKey": "worldcup",
+        "source": "espn+wr",
+        "externalId": "164205",
+        "teamsCount": 24,
+        "teamsNote": "24 selecciones desde RWC 2027 (20 hasta RWC 2023)",
+        "season": "Octubre – Noviembre (cada 4 años)",
+        "isArgentinaCore": False,
+        "sortOrder": 32,
+        "standingsLeagueId": "164205",
+        "notes": "Máximo torneo mundial de selecciones organizado por World Rugby.",
+    },
+]
+
+SRA_FRANCHISES = [
+    {"key": "dogos xv", "name": "Dogos XV", "abbr": "DOG", "country": "Argentina", "flag": "ar", "city": "Córdoba", "stadium": "Tala Rugby Club / Córdoba Athletic", "coach": "Diego Ghiglione", "crestUrl": "https://dle22gvyr6oyt.cloudfront.net/images/img_4804-1.png"},
+    {"key": "pampas", "name": "Pampas", "abbr": "PAM", "country": "Argentina", "flag": "ar", "city": "Buenos Aires", "stadium": "La Catedral (CASI)", "coach": "Juan Manuel Leguizamón", "crestUrl": "https://dle22gvyr6oyt.cloudfront.net/images/pampas_xv_logo-1.png"},
+    {"key": "capibaras xv", "name": "Capibaras XV", "abbr": "CAP", "country": "Argentina", "flag": "ar", "city": "Rosario", "stadium": "Jockey Club de Rosario / Hipódromo", "coach": "Nicolás Galatro", "crestUrl": "https://dle22gvyr6oyt.cloudfront.net/images/capibaras_xv_logo.png"},
+    {"key": "tarucas", "name": "Tarucas", "abbr": "TAR", "country": "Argentina", "flag": "ar", "city": "Tucumán", "stadium": "La Caldera del Parque (Tucumán LT)", "coach": "Álvaro Galindo", "crestUrl": "https://dle22gvyr6oyt.cloudfront.net/images/tarucas_-original-1.png"},
+    {"key": "penarol rugby", "name": "Peñarol Rugby", "abbr": "PEN", "country": "Uruguay", "flag": "uy", "city": "Montevideo", "stadium": "Estadio Charrúa", "coach": "Ivo Dugonjic", "crestUrl": "https://dle22gvyr6oyt.cloudfront.net/images/l_af25ccf9-c195-42b1-906f-29fe2a174509_20250306033543830.png"},
+    {"key": "selknam", "name": "Selknam", "abbr": "SEL", "country": "Chile", "flag": "cl", "city": "Santiago", "stadium": "Estadio Municipal de La Pintana", "coach": "Jake Mangin", "crestUrl": "https://dle22gvyr6oyt.cloudfront.net/images/selknam-1.png"},
+    {"key": "yacare xv", "name": "Yacare XV", "abbr": "YAC", "country": "Paraguay", "flag": "py", "city": "Luque / Asunción", "stadium": "Estadio Héroes de Curupayty", "coach": "Ramiro Pemán", "crestUrl": "https://dle22gvyr6oyt.cloudfront.net/images/yacarexv-1-1.png"},
+    {"key": "cobras brasil rugby", "name": "Cobras Brasil Rugby", "abbr": "COB", "country": "Brasil", "flag": "br", "city": "Jacareí / São Paulo", "stadium": "Estádio Du Cambusano", "coach": "Josh Reeves", "crestUrl": "https://dle22gvyr6oyt.cloudfront.net/images/155_logo-cobras-2024_cobras-amarelo-v.png"},
 ]
 
 WIKI_PAGE_MAP = {
@@ -279,6 +517,23 @@ def init_db() -> sqlite3.Connection:
             lineup_json TEXT,
             updated_at TEXT
         );
+        CREATE TABLE IF NOT EXISTS competitions (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            short_name TEXT NOT NULL,
+            region TEXT NOT NULL,
+            category TEXT NOT NULL,
+            group_key TEXT NOT NULL,
+            source TEXT NOT NULL,
+            external_id TEXT,
+            teams_count INTEGER NOT NULL,
+            teams_note TEXT,
+            season_window TEXT NOT NULL,
+            is_argentina_core INTEGER DEFAULT 0,
+            sort_order INTEGER DEFAULT 50,
+            matches_count INTEGER DEFAULT 0,
+            updated_at TEXT
+        );
         """
     )
     conn.commit()
@@ -491,11 +746,49 @@ def classify_group(league_name: str, sport: str = "") -> str:
         return "top14"
     if any(k in low for k in ("urba", "buenos aires")):
         return "urba"
-    if any(k in low for k in ("nacional de clubes", "super rugby americas", "súper rugby américas")):
+    if any(k in low for k in ("super rugby americas", "súper rugby américas")):
+        return "sra"
+    if "nacional de clubes" in low:
         return "arg"
+    if any(k in low for k in ("champions cup", "challenge cup", "epcr")):
+        return "copas"
     if any(k in low for k in ("nations", "six nations", "rugby championship", "international", "lions tour", "pacific nations", "bledisloe", "wxv", "rugby europe")):
         return "nations"
     return "clubs"
+
+
+def classify_comp_id(league_name: str, group: str, league_id: str = "") -> tuple[str, str]:
+    low = (league_name or "").lower()
+    lid = str(league_id or "")
+    if group == "urba" or "urba" in low or lid in ("289279", "2009"):
+        return "ar-urba-top14", "Clubes"
+    if group == "top14" or ("top 14" in low and "urba" not in low) or lid == "270559":
+        return "fr-top14", "Clubes"
+    if group == "sra" or "super rugby americas" in low or "súper rugby américas" in low:
+        return "sa-super-rugby-americas", "Clubes"
+    if "united rugby championship" in low or low.startswith("urc") or " urc" in low or lid == "270557":
+        return "eu-urc", "Clubes"
+    if lid == "267979" or ("premiership" in low and "women" not in low and "cup" not in low):
+        return "eng-premiership", "Clubes"
+    if "super rugby pacific" in low or lid == "242041":
+        return "oce-super-rugby-pacific", "Clubes"
+    if "champions cup" in low or lid == "271937":
+        return "epcr-champions-cup", "Copas"
+    if "challenge cup" in low or lid == "272073":
+        return "epcr-challenge-cup", "Copas"
+    if group == "copas":
+        return "epcr-champions-cup", "Copas"
+    if "rugby championship" in low or lid == "244293":
+        return "trc-rugby-championship", "Selecciones"
+    if "six nations" in low or "seis naciones" in low or lid == "180659":
+        return "eu-six-nations", "Selecciones"
+    if group == "worldcup" or "world cup" in low or lid in ("164205", "289237"):
+        return "rwc-world-cup", "Selecciones"
+    if group == "sevens":
+        return "wr-svns", "Selecciones"
+    if group in ("nations", "arg"):
+        return "int-nations-tests", "Selecciones"
+    return "int-clubs-other", "Clubes"
 
 
 def parse_espn_matches(now_utc: dt.datetime) -> list[dict]:
@@ -573,6 +866,8 @@ def parse_espn_matches(now_utc: dt.datetime) -> list[dict]:
                     "leagueName": lg["name"],
                     "leagueShort": lg["short"],
                     "group": lg["group"],
+                    "compId": lg.get("compId") or classify_comp_id(lg["name"], lg["group"], lg["id"])[0],
+                    "category": lg.get("category") or classify_comp_id(lg["name"], lg["group"], lg["id"])[1],
                     "status": status,
                     "statusText": str((ev.get("status") or {}).get("type", {}).get("shortDetail") or status),
                     "isArgentina": is_arg,
@@ -657,6 +952,8 @@ def parse_world_rugby_matches(now_utc: dt.datetime) -> list[dict]:
                 "leagueShort": ev_label.replace("Men's Sevens Series 2027", "SVNS 7s M").replace("Women's Sevens Series 2027", "SVNS 7s F"),
                 "phase": re.sub(r"\bPool\s+Pool\b", "Pool", str(m.get("eventPhase") or "")).strip(),
                 "group": group,
+                "compId": classify_comp_id(ev_label, group, sport)[0],
+                "category": classify_comp_id(ev_label, group, sport)[1],
                 "sport": sport,
                 "status": status,
                 "statusText": status_text,
@@ -971,15 +1268,23 @@ def apply_team_meta_and_log(matches: list[dict], conn: sqlite3.Connection, ranki
 
     team_groups: dict[str, set] = {}
     team_leagues: dict[str, set] = {}
+    team_comps: dict[str, set] = {}
     for m in matches:
         grp = m.get("group") or ""
         lg_short = m.get("leagueShort") or m.get("leagueName") or ""
+        cid = m.get("compId") or ""
         for side in ("home", "away"):
             tnk = norm_key(m[side]["name"])
             if grp:
                 team_groups.setdefault(tnk, set()).add(grp)
             if lg_short:
                 team_leagues.setdefault(tnk, set()).add(lg_short)
+            if cid:
+                team_comps.setdefault(tnk, set()).add(cid)
+    for fr in SRA_FRANCHISES:
+        team_groups.setdefault(fr["key"], set()).add("sra")
+        team_leagues.setdefault(fr["key"], set()).add("Súper Rugby Américas")
+        team_comps.setdefault(fr["key"], set()).add("sa-super-rugby-americas")
 
     directory = []
     seen = set()
@@ -1018,9 +1323,10 @@ def apply_team_meta_and_log(matches: list[dict], conn: sqlite3.Connection, ranki
             "worldRank": rk_men_map.get(nk),
             "groups": grps,
             "leagues": lgs,
+            "compIds": sorted(team_comps.get(nk, set())),
             "roster": r_info["lineup"] if r_info else [],
             "rosterUpdated": r_info["eventDate"][:10] if r_info else "",
-            "isArgentina": ("argentina" in nk or nk in ("newman", "hindu", "sic", "casi", "belgrano ac", "cuba", "alumni", "regatas bella vista", "b.a.c.r.c.", "san luis", "champagnat", "club atletico del rosario", "pampas", "dogos xv", "tarucas")),
+            "isArgentina": ("argentina" in nk or nk in ("newman", "hindu", "sic", "casi", "belgrano ac", "cuba", "alumni", "regatas bella vista", "b.a.c.r.c.", "san luis", "champagnat", "club atletico del rosario", "pampas", "dogos xv", "tarucas", "capibaras xv")),
         })
     directory.sort(key=lambda x: (0 if x["isArgentina"] else 1, x["worldRank"] or 999, 0 if x["roster"] else 1, x["name"]))
     return directory, new_logged
@@ -1259,6 +1565,8 @@ def fetch_urba_official_data(conn: sqlite3.Connection) -> tuple[dict, list[dict]
                         "leagueShort": f"URBA {cfg['short']}",
                         "phase": rname,
                         "group": "urba",
+                        "compId": "ar-urba-top14",
+                        "category": "Clubes",
                         "status": status,
                         "statusText": "Suspendido" if suspended else ("Finalizado" if fulfilled else "Programado"),
                         "isArgentina": True,
@@ -1542,6 +1850,323 @@ def fetch_rugby_news() -> list[dict]:
     return deduped[:90]
 
 
+
+def fetch_sra_official_data(conn: sqlite3.Connection) -> tuple[list[dict], list[dict]]:
+    now_iso = dt.datetime.now(UTC_TZ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    franchise_map = {norm_key(fr["name"]): fr for fr in SRA_FRANCHISES}
+    franchise_map.update({fr["key"]: fr for fr in SRA_FRANCHISES})
+
+    for fr in SRA_FRANCHISES:
+        conn.execute(
+            """INSERT INTO team_meta(team_key, display_name, espn_id, crest_url, coach, stadium, country, wiki_title, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(team_key) DO UPDATE SET
+                 crest_url=CASE WHEN excluded.crest_url != '' THEN excluded.crest_url ELSE team_meta.crest_url END,
+                 coach=CASE WHEN excluded.coach != '' THEN excluded.coach ELSE team_meta.coach END,
+                 stadium=CASE WHEN excluded.stadium != '' THEN excluded.stadium ELSE team_meta.stadium END,
+                 country=excluded.country,
+                 updated_at=excluded.updated_at""",
+            (fr["key"], fr["name"], "", fr["crestUrl"], fr["coach"], fr["stadium"], fr["country"], "", now_iso),
+        )
+    conn.commit()
+
+    standings_out: list[dict] = []
+    dash_html = fetch_text("https://regisar.sudamerica.rugby/embed/dashboard", timeout=12)
+    if dash_html:
+        pos_m = re.search(r'id="positions-card".*?<tbody[^>]*>(.*?)</tbody>', dash_html, re.S)
+        if pos_m:
+            for row_html in re.findall(r"<tr[^>]*>(.*?)</tr>", pos_m.group(1), re.S):
+                tds = re.findall(r"<td[^>]*>(.*?)</td>", row_html, re.S)
+                if len(tds) < 13:
+                    continue
+                pos_txt = strip_html(tds[0])
+                raw_team_txt = strip_html(tds[1])
+                clean_name = raw_team_txt
+                for fr in SRA_FRANCHISES:
+                    if fr["name"].lower() in raw_team_txt.lower():
+                        clean_name = fr["name"]
+                        break
+                nk = norm_key(clean_name)
+                fr_info = franchise_map.get(nk, {})
+                try:
+                    standings_out.append({
+                        "pos": int(re.sub(r"[^0-9]", "", pos_txt) or (len(standings_out) + 1)),
+                        "name": clean_name,
+                        "crestUrl": fr_info.get("crestUrl", ""),
+                        "flagUrl": get_country_flag_url(nk),
+                        "played": int(strip_html(tds[2]) or 0),
+                        "won": int(strip_html(tds[3]) or 0),
+                        "tied": int(strip_html(tds[4]) or 0),
+                        "lost": int(strip_html(tds[5]) or 0),
+                        "pf": int(strip_html(tds[6]) or 0),
+                        "pc": int(strip_html(tds[7]) or 0),
+                        "diff": strip_html(tds[10]),
+                        "bonus": int(strip_html(tds[11]) or 0),
+                        "pts": int(strip_html(tds[12]) or 0),
+                    })
+                except Exception:
+                    continue
+
+    sra_matches: list[dict] = []
+    seen_sra_ids = set()
+    for page_num in (4, 3):
+        p_html = fetch_text(f"https://regisar.sudamerica.rugby/embed/partidos?page={page_num}", timeout=12)
+        if not p_html:
+            continue
+        tb = re.search(r"<tbody[^>]*>(.*?)</tbody>", p_html, re.S)
+        if not tb:
+            continue
+        for r_html in re.findall(r"<tr[^>]*>(.*?)</tr>", tb.group(1), re.S):
+            tds = re.findall(r"<td[^>]*>(.*?)</td>", r_html, re.S)
+            if len(tds) < 6:
+                continue
+            num_id = re.sub(r"[^0-9]", "", strip_html(tds[0]))
+            if not num_id or num_id in seen_sra_ids:
+                continue
+            seen_sra_ids.add(num_id)
+
+            date_parts = strip_html(tds[1])
+            dm = re.search(r"(\d{2})/(\d{2})/(\d{4}).*?(\d{2}):(\d{2})", date_parts)
+            utc_dt = None
+            if dm:
+                dd, mm, yyyy, hh, mi = map(int, dm.groups())
+                local_dt = dt.datetime(yyyy, mm, dd, hh, mi, tzinfo=ARG_TZ)
+                utc_dt = local_dt.astimezone(UTC_TZ)
+            times = format_arg_times(utc_dt)
+
+            round_name = strip_html(tds[2]) or "Súper Rugby Américas"
+            score_cell = tds[3]
+            teams_found = re.findall(r'<div class="text-white font-medium text-sm">\s*(.*?)\s*</div>', score_cell, re.S)
+            if len(teams_found) < 2:
+                continue
+            h_name = strip_html(teams_found[0])
+            a_name = strip_html(teams_found[1])
+
+            sc_m = re.search(r"(\d+)\s*-\s*(\d+)", score_cell)
+            h_sc = sc_m.group(1) if sc_m else None
+            a_sc = sc_m.group(2) if sc_m else None
+            venue_txt = strip_html(tds[4])
+            status_raw = strip_html(tds[5]).lower()
+            status = "finished" if ("final" in status_raw or h_sc is not None) else ("live" if "curso" in status_raw else "scheduled")
+
+            h_nk = norm_key(h_name)
+            a_nk = norm_key(a_name)
+            h_fr = franchise_map.get(h_nk, {})
+            a_fr = franchise_map.get(a_nk, {})
+            is_arg = (h_fr.get("flag") == "ar" or a_fr.get("flag") == "ar")
+
+            sra_matches.append({
+                "id": f"sra:{num_id}",
+                "source": "sudamerica-rugby",
+                "eventId": num_id,
+                "leagueId": "regisar-11",
+                "leagueName": "Súper Rugby Américas",
+                "leagueShort": "Súper Rugby Américas",
+                "phase": round_name,
+                "group": "sra",
+                "compId": "sa-super-rugby-americas",
+                "category": "Clubes",
+                "status": status,
+                "statusText": "Finalizado" if status == "finished" else ("En Curso" if status == "live" else "Programado"),
+                "isArgentina": is_arg,
+                "venue": {"name": venue_txt or h_fr.get("stadium", ""), "city": h_fr.get("city", ""), "country": h_fr.get("country", "")},
+                "odds": None,
+                **times,
+                "home": {
+                    "name": h_name,
+                    "abbr": h_fr.get("abbr") or h_name[:3].upper(),
+                    "crestUrl": h_fr.get("crestUrl", ""),
+                    "flagUrl": get_country_flag_url(h_nk),
+                    "score": h_sc if status != "scheduled" else None,
+                    "lineup": [],
+                    "coach": h_fr.get("coach", ""),
+                },
+                "away": {
+                    "name": a_name,
+                    "abbr": a_fr.get("abbr") or a_name[:3].upper(),
+                    "crestUrl": a_fr.get("crestUrl", ""),
+                    "flagUrl": get_country_flag_url(a_nk),
+                    "score": a_sc if status != "scheduled" else None,
+                    "lineup": [],
+                    "coach": a_fr.get("coach", ""),
+                },
+                "scoring": [],
+                "cards": [],
+                "officials": [],
+            })
+
+    sra_matches.sort(key=lambda x: -(x.get("ts") or 0))
+    return standings_out, sra_matches[:24]
+
+
+def fetch_espn_standings_for_comp(comp: dict, meta_map: dict) -> list[dict]:
+    lid = comp.get("standingsLeagueId")
+    if not lid:
+        return []
+    season_q = f"?season={comp['seasonParam']}" if comp.get("seasonParam") else ""
+    d = fetch_json(f"https://site.api.espn.com/apis/v2/sports/rugby/{lid}/standings{season_q}", timeout=10)
+    if not isinstance(d, dict):
+        return []
+    groups = d.get("children") or [d]
+    tables = []
+    for g in groups:
+        st = g.get("standings") or {}
+        entries = st.get("entries") or []
+        if not entries:
+            continue
+        rows = []
+        for idx, e in enumerate(entries, 1):
+            tm = e.get("team") or {}
+            tname = str(tm.get("displayName") or tm.get("name") or "").strip()
+            if not tname:
+                continue
+            tnk = norm_key(tname)
+            stats_map = {str(s.get("name") or "").lower(): s for s in (e.get("stats") or [])}
+            def sval(k, default="0"):
+                s = stats_map.get(k.lower())
+                if not s:
+                    return default
+                return s.get("displayValue") if s.get("displayValue") is not None else str(s.get("value") or default)
+            gp = int(float(sval("gamesPlayed", "0") or 0))
+            if lid == "242041" and "rebels" in tnk and gp == 0:
+                continue
+            logos = tm.get("logos") or []
+            raw_logo = clean_url(logos[0].get("href")) if logos else ""
+            crest = resolve_crest_url(tnk, raw_logo, meta_map)
+            rows.append({
+                "pos": int(float(sval("rank", str(idx)) or idx)),
+                "name": tname,
+                "crestUrl": crest,
+                "flagUrl": get_country_flag_url(tnk),
+                "played": gp,
+                "won": int(float(sval("gamesWon", "0") or 0)),
+                "tied": int(float(sval("gamesDrawn", "0") or 0)),
+                "lost": int(float(sval("gamesLost", "0") or 0)),
+                "pf": int(float(sval("pointsFor", "0") or 0)),
+                "pc": int(float(sval("pointsAgainst", "0") or 0)),
+                "diff": str(sval("pointsDifference", "0")),
+                "bonus": int(float(sval("bonusPoints", "0") or 0)),
+                "pts": int(float(sval("points", "0") or 0)),
+            })
+        if rows:
+            rows.sort(key=lambda r: (r["pos"], -r["pts"]))
+            tables.append({
+                "groupName": g.get("name") or comp["shortName"],
+                "seasonLabel": str(st.get("seasonDisplayName") or st.get("season") or comp["season"]),
+                "rows": rows,
+            })
+    return tables
+
+
+def build_competitions_catalog(
+    conn: sqlite3.Connection,
+    matches: list[dict],
+    sra_standings: list[dict],
+    urba_data: dict,
+    meta_map: dict,
+) -> tuple[list[dict], list[dict]]:
+    now_iso = dt.datetime.now(UTC_TZ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    standings_by_id: dict[str, list[dict]] = {}
+
+    def _fetch(comp):
+        return comp["id"], fetch_espn_standings_for_comp(comp, meta_map)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+        for cid, tbls in ex.map(_fetch, [c for c in COMPETITIONS_CATALOG if c.get("standingsLeagueId")]):
+            standings_by_id[cid] = tbls
+
+    urba_champs = (urba_data or {}).get("championships") or []
+    if urba_champs and urba_champs[0].get("standings"):
+        standings_by_id["ar-urba-top14"] = [{
+            "groupName": urba_champs[0].get("name") or "URBA Top 14",
+            "seasonLabel": "2026",
+            "rows": urba_champs[0]["standings"],
+        }]
+    if sra_standings:
+        standings_by_id["sa-super-rugby-americas"] = [{
+            "groupName": "Tabla General — Súper Rugby Américas 2026",
+            "seasonLabel": "2026",
+            "rows": sra_standings,
+        }]
+
+    out_comps: list[dict] = []
+    for c in COMPETITIONS_CATALOG:
+        cid = c["id"]
+        if cid == "ar-urba-top14":
+            m_count = sum(1 for m in matches if m.get("group") == "urba")
+        elif cid == "ar-los-pumas":
+            m_count = sum(1 for m in matches if m.get("isArgentina") and m.get("group") != "urba")
+        else:
+            m_count = sum(1 for m in matches if m.get("compId") == cid)
+
+        conn.execute(
+            """INSERT INTO competitions(id, name, short_name, region, category, group_key, source, external_id, teams_count, teams_note, season_window, is_argentina_core, sort_order, matches_count, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                 name=excluded.name,
+                 short_name=excluded.short_name,
+                 region=excluded.region,
+                 category=excluded.category,
+                 group_key=excluded.group_key,
+                 source=excluded.source,
+                 external_id=excluded.external_id,
+                 teams_count=excluded.teams_count,
+                 teams_note=excluded.teams_note,
+                 season_window=excluded.season_window,
+                 is_argentina_core=excluded.is_argentina_core,
+                 sort_order=excluded.sort_order,
+                 matches_count=excluded.matches_count,
+                 updated_at=excluded.updated_at""",
+            (
+                cid, c["name"], c["shortName"], c["region"], c["category"], c["groupKey"],
+                c["source"], c.get("externalId") or "", c["teamsCount"], c.get("teamsNote") or "",
+                c["season"], 1 if c["isArgentinaCore"] else 0, c["sortOrder"], m_count, now_iso,
+            ),
+        )
+        entry = {
+            "id": cid,
+            "name": c["name"],
+            "shortName": c["shortName"],
+            "region": c["region"],
+            "category": c["category"],
+            "groupKey": c["groupKey"],
+            "source": c["source"],
+            "externalId": c.get("externalId") or "",
+            "teamsCount": c["teamsCount"],
+            "teamsNote": c.get("teamsNote") or "",
+            "season": c["season"],
+            "isArgentinaCore": bool(c["isArgentinaCore"]),
+            "sortOrder": c["sortOrder"],
+            "matchesCount": m_count,
+            "notes": c.get("notes") or "",
+            "standings": standings_by_id.get(cid, []),
+        }
+        if cid == "sa-super-rugby-americas":
+            entry["franchises"] = SRA_FRANCHISES
+        out_comps.append(entry)
+
+    conn.commit()
+    cat_order = ["Clubes", "Copas", "Selecciones"]
+    cat_desc = {
+        "Clubes": "Ligas principales de clubes y franquicias (Top 14 Francia diferenciado de URBA Bs.As., URC, Premiership, Super Rugby Pacific y Súper Rugby Américas).",
+        "Copas": "Copas continentales de clubes de Europa e invitados organizadas por EPCR.",
+        "Selecciones": "Torneos internacionales de selecciones nacionales (Los Pumas intactos, The Rugby Championship, Seis Naciones y Mundial RWC).",
+    }
+    categories = []
+    for cat in cat_order:
+        comps_cat = [x for x in out_comps if x["category"] == cat]
+        categories.append({
+            "id": cat.lower(),
+            "name": cat,
+            "description": cat_desc[cat],
+            "competitionsCount": len(comps_cat),
+            "internationalCount": sum(1 for x in comps_cat if not x["isArgentinaCore"]),
+            "argentinaCoreCount": sum(1 for x in comps_cat if x["isArgentinaCore"]),
+            "competitionIds": [x["id"] for x in comps_cat],
+        })
+    return out_comps, categories
+
+
 def build_confirmed_lineups(matches: list[dict], teams_dir: list[dict]) -> list[dict]:
     dir_map = {t["key"]: t for t in teams_dir}
     out = []
@@ -1594,17 +2219,19 @@ def main() -> None:
     conn = init_db()
     team_index = harvest_espn_teams(conn)
     urba_data, urba_feed_matches = fetch_urba_official_data(conn)
+    sra_standings, sra_matches = fetch_sra_official_data(conn)
     news_items = fetch_rugby_news()
     espn_matches = parse_espn_matches(now_utc)
     wr_matches = parse_world_rugby_matches(now_utc)
     matches = merge_and_dedupe(espn_matches, wr_matches)
     enrich_match_details(matches, conn)
-    # Append latest official URBA matches (avoid duplicating ESPN URBA Top 14 final)
+    # Append latest official URBA & SRA matches without duplicating ESPN
     existing_keys = {(norm_key(m["home"]["name"]), norm_key(m["away"]["name"]), m["dayArg"]) for m in matches}
-    for um in urba_feed_matches:
-        uk = (norm_key(um["home"]["name"]), norm_key(um["away"]["name"]), um["dayArg"])
+    for extra_m in (urba_feed_matches + sra_matches):
+        uk = (norm_key(extra_m["home"]["name"]), norm_key(extra_m["away"]["name"]), extra_m["dayArg"])
         if uk not in existing_keys:
-            matches.append(um)
+            existing_keys.add(uk)
+            matches.append(extra_m)
 
     names_to_enrich = list(WIKI_PAGE_MAP.keys())
     for m in matches:
@@ -1681,9 +2308,14 @@ def main() -> None:
     ]
 
     confirmed_lineups = build_confirmed_lineups(matches, teams_dir)
+    competitions_list, categories_list = build_competitions_catalog(conn, matches, sra_standings, urba_data, meta_rows_map)
 
     payload = {
-        "engineVersion": "3.1.0-RUGBY-PRO-LUX",
+        "engineVersion": "3.2.0-RUGBY-GLOBAL-PRO",
+        "categories": categories_list,
+        "competitions": competitions_list,
+        "competitionsSchemaSQL": COMPETITIONS_SCHEMA_SQL,
+        "sra": {"standings": sra_standings, "franchises": SRA_FRANCHISES, "matchesCount": len(sra_matches)},
         "confirmedLineups": confirmed_lineups,
         "urba": urba_data,
         "news": news_items,
@@ -1718,6 +2350,14 @@ def main() -> None:
 
     with open(OUT_HISTORY_JSON, "w", encoding="utf-8") as f:
         json.dump({"updatedAt": payload["generatedAt"], "history": history_list, "teams": teams_dir[:80]}, f, ensure_ascii=False)
+
+    with open(OUT_COMPETITIONS_JSON, "w", encoding="utf-8") as f:
+        json.dump({
+            "updatedAt": payload["generatedAt"],
+            "schemaSQL": COMPETITIONS_SCHEMA_SQL,
+            "categories": categories_list,
+            "competitions": competitions_list,
+        }, f, ensure_ascii=False, indent=2)
 
     with open(OUT_REPORT_MD, "w", encoding="utf-8") as f:
         f.write(

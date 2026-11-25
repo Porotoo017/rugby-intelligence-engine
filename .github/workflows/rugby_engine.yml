@@ -24,7 +24,7 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/rugby_master.db data/rugby_engine_output.json rugby_engine_output.json data/rugby_teams_history.json REPORT_ACTUAL.md
+          git add data/rugby_master.db data/rugby_engine_output.json rugby_engine_output.json data/rugby_teams_history.json data/rugby_competitions.json REPORT_ACTUAL.md
           if ! git diff --staged --quiet; then
             git commit -m "chore(rugby): auto-sync daily news, lineups, fixtures & rosters"
             git pull --rebase --autostash origin main || true

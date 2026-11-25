@@ -1,8 +1,8 @@
-const CACHE_NAME = 'rugby-intel-v3.1.1';
+const CACHE_NAME = 'rugby-intel-v3.2.0';
 const STATIC_ASSETS = [
   './',
   './index.html',
-  './app.js?v=3.1.1',
+  './app.js?v=3.2.0',
   './manifest.json',
   './assets/hero_stadium.jpg',
   './assets/pumas_banner.jpg',
@@ -29,7 +29,7 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-  if (url.pathname.endsWith('rugby_engine_output.json') || url.pathname.endsWith('rugby_teams_history.json')) {
+  if (url.pathname.endsWith('rugby_engine_output.json') || url.pathname.endsWith('rugby_teams_history.json') || url.pathname.endsWith('rugby_competitions.json')) {
     event.respondWith(
       fetch(event.request)
         .then((res) => {

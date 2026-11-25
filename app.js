@@ -8,6 +8,8 @@
     data: null,
     tab: 'matches',
     matchGroup: 'all',
+    matchCompId: 'all',
+    compViewMode: 'matches',
     matchStatus: 'all',
     search: '',
     urbaChampId: 2025176,
@@ -416,20 +418,98 @@
       </div>`;
   }
 
+
+  function renderCompStandings(comp) {
+    const tables = comp.standings || [];
+    if (!tables.length) {
+      return `<div class="empty-box">Sin tabla de posiciones activa en esta ventana para ${esc(comp.shortName)}.</div>`;
+    }
+    return tables.map((tbl) => `
+      <div class="section-head" style="margin:12px 0 8px;">
+        <h3 class="section-title" style="font-size:1.15rem;">${esc(tbl.groupName)}</h3>
+        <span class="section-sub">Temporada ${esc(tbl.seasonLabel || comp.season)}</span>
+      </div>
+      <div class="table-wrap" style="margin-bottom:14px;">
+        <table class="rank-table">
+          <thead>
+            <tr><th>#</th><th>Equipo</th><th>PJ</th><th>G</th><th>E</th><th>P</th><th>Dif</th><th>Bono</th><th>Pts</th></tr>
+          </thead>
+          <tbody>
+            ${(tbl.rows || []).map((r) => `
+              <tr>
+                <td class="mono-num" style="font-weight:700;color:${r.pos <= 4 ? 'var(--gold)' : 'var(--text)'};">${r.pos}</td>
+                <td>
+                  <div style="display:flex;align-items:center;gap:8px;min-width:150px;">
+                    ${renderTeamVisual(r.crestUrl, r.flagUrl, r.name, 'sm')}
+                    <span style="font-weight:600;color:var(--text);">${esc(r.name)}</span>
+                  </div>
+                </td>
+                <td class="mono-num">${r.played}</td>
+                <td class="mono-num">${r.won}</td>
+                <td class="mono-num">${r.tied}</td>
+                <td class="mono-num">${r.lost}</td>
+                <td class="mono-num" style="color:${String(r.diff || '').startsWith('-') ? 'var(--crimson)' : 'var(--turf)'};">${esc(r.diff)}</td>
+                <td class="mono-num">${r.bonus}</td>
+                <td class="mono-num" style="font-weight:800;color:var(--gold);">${r.pts}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    `).join('');
+  }
+
+  function renderCompetitionSpotlight(comp, matchCount) {
+    if (!comp) return '';
+    const hasStandings = Array.isArray(comp.standings) && comp.standings.length > 0;
+    return `
+      <section class="comp-spotlight">
+        <div class="comp-spot-top">
+          <div style="min-width:0;flex:1;">
+            <div class="comp-card-kicker ${comp.isArgentinaCore ? 'arg' : ''}">
+              ${esc(comp.category)} · ${esc(comp.region)} · ID: ${esc(comp.id)}
+            </div>
+            <h2 class="comp-spot-title">${esc(comp.name)}</h2>
+            <div class="comp-spot-meta">
+              <strong>${esc(comp.teamsCount)} equipos</strong> (${esc(comp.teamsNote || '')}) · Temporada: <strong>${esc(comp.season)}</strong> · ${matchCount} partidos en agenda
+            </div>
+            ${comp.notes ? `<div style="font-size:0.78rem;color:var(--text-soft);margin-top:6px;">${esc(comp.notes)}</div>` : ''}
+          </div>
+          ${hasStandings ? `
+            <div class="sub-seg" style="margin-bottom:0;min-width:max-content;">
+              <button class="sub-btn ${state.compViewMode === 'matches' ? 'active' : ''}" data-comp-view="matches" type="button">Partidos (${matchCount})</button>
+              <button class="sub-btn ${state.compViewMode === 'standings' ? 'active' : ''}" data-comp-view="standings" type="button">Tabla de Posiciones</button>
+            </div>` : ''}
+        </div>
+      </section>`;
+  }
+
   function renderMatchesTab(d) {
     const gc = d.groupCounts || {};
+    const comps = d.competitions || [];
+    const clubCount = (gc.top14 || 0) + (gc.clubs || 0) + (gc.sra || 0) + (gc.urba || 0);
+    const nationsCount = (gc.nations || 0) + (gc.worldcup || 0);
     const groupTabs = [
       { id: 'all', label: `Todos (${d.totalMatches || 0})` },
-      { id: 'arg', label: `Argentina (${(d.argentinaMatches || []).length})` },
-      { id: 'top14', label: `Top 14 Francia (${gc.top14 || 0})` },
-      { id: 'nations', label: `Naciones & Int. (${gc.nations || 0})` },
-      { id: 'worldcup', label: `Mundial (${gc.worldcup || 0})` },
+      { id: 'arg', label: `Argentina & URBA (${(d.argentinaMatches || []).length})` },
+      { id: 'cat-clubes', label: `Ligas Clubes (${clubCount})` },
+      { id: 'cat-copas', label: `Copas Europeas (${gc.copas || 0})` },
+      { id: 'cat-selecciones', label: `Selecciones (${nationsCount})` },
       { id: 'sevens', label: `Seven SVNS (${gc.sevens || 0})` },
-      { id: 'urba', label: `URBA Bs.As. (${gc.urba || 0})` },
-      { id: 'clubs', label: `Clubes (${gc.clubs || 0})` },
     ];
+
+    const visibleComps = comps.filter((c) => {
+      if (state.matchGroup === 'arg') return c.isArgentinaCore || c.id === 'sa-super-rugby-americas' || c.id === 'trc-rugby-championship';
+      if (state.matchGroup === 'cat-clubes') return c.category === 'Clubes';
+      if (state.matchGroup === 'cat-copas') return c.category === 'Copas';
+      if (state.matchGroup === 'cat-selecciones') return c.category === 'Selecciones';
+      if (state.matchGroup === 'sevens') return false;
+      return true;
+    });
+
+    const activeComp = state.matchCompId !== 'all' ? comps.find((c) => c.id === state.matchCompId) : null;
+
     const statusTabs = [
-      { id: 'all', label: `Todos (${d.totalMatches || 0})` },
+      { id: 'all', label: 'Todos' },
       { id: 'live', label: `En Vivo (${(d.statusCounts && d.statusCounts.live) || 0})` },
       { id: 'scheduled', label: `Próximos (${(d.statusCounts && d.statusCounts.scheduled) || 0})` },
       { id: 'finished', label: `Finalizados (${(d.statusCounts && d.statusCounts.finished) || 0})` },
@@ -437,8 +517,19 @@
 
     const q = norm(state.search);
     const filtered = (d.matches || []).filter((m) => {
-      if (state.matchGroup === 'arg' && !m.isArgentina) return false;
-      if (state.matchGroup !== 'all' && state.matchGroup !== 'arg' && m.group !== state.matchGroup) return false;
+      if (state.matchCompId !== 'all') {
+        if (state.matchCompId === 'ar-los-pumas') {
+          if (!(m.isArgentina && m.group !== 'urba')) return false;
+        } else if (m.compId !== state.matchCompId) {
+          return false;
+        }
+      } else {
+        if (state.matchGroup === 'arg' && !m.isArgentina) return false;
+        if (state.matchGroup === 'cat-clubes' && !['urba', 'top14', 'clubs', 'sra', 'arg'].includes(m.group)) return false;
+        if (state.matchGroup === 'cat-copas' && m.group !== 'copas') return false;
+        if (state.matchGroup === 'cat-selecciones' && !['nations', 'worldcup'].includes(m.group)) return false;
+        if (state.matchGroup === 'sevens' && m.group !== 'sevens') return false;
+      }
       if (state.matchStatus !== 'all' && m.status !== state.matchStatus) return false;
       if (q) {
         const hay = norm(`${m.home.name} ${m.away.name} ${m.leagueName} ${m.leagueShort} ${m.phase || ''} ${m.venue && m.venue.name} ${m.venue && m.venue.city}`);
@@ -447,22 +538,43 @@
       return true;
     });
 
-    const cardsHtml = filtered.length
-      ? `<div class="cards-grid">${filtered.slice(0, 96).map(renderMatchCard).join('')}</div>`
-      : `<div class="empty-box">No hay partidos que coincidan con "${esc(state.search || state.matchGroup)}". Probá cambiando el filtro arriba.</div>`;
+    const compRailHtml = visibleComps.length ? `
+      <div class="comp-rail" aria-label="Competencias oficiales">
+        <button class="comp-btn ${state.matchCompId === 'all' ? 'active' : ''}" data-match-comp="all" type="button">
+          <span class="comp-btn-title">Todas las competencias</span>
+          <span class="comp-btn-meta">${visibleComps.length} torneos en categoría</span>
+        </button>
+        ${visibleComps.map((c) => `
+          <button class="comp-btn ${state.matchCompId === c.id ? 'active' : ''}" data-match-comp="${esc(c.id)}" type="button">
+            <span class="comp-btn-title">${esc(c.shortName)}</span>
+            <span class="comp-btn-meta">${c.teamsCount} eq · ${esc(c.season)} · ${c.matchesCount} part.</span>
+          </button>
+        `).join('')}
+      </div>` : '';
 
-    const showPulse = (state.matchGroup === 'all' || state.matchGroup === 'arg') && !q;
+    const spotHtml = activeComp ? renderCompetitionSpotlight(activeComp, filtered.length) : '';
+    const showStandings = Boolean(activeComp && state.compViewMode === 'standings' && (activeComp.standings || []).length);
+
+    const cardsHtml = showStandings
+      ? renderCompStandings(activeComp)
+      : (filtered.length
+        ? `<div class="cards-grid">${filtered.slice(0, 96).map(renderMatchCard).join('')}</div>`
+        : `<div class="empty-box">No hay partidos en vivo o programados esta semana para "${esc((activeComp && activeComp.name) || state.search || state.matchGroup)}". ${(activeComp && activeComp.standings && activeComp.standings.length) ? 'Podés revisar la Tabla de Posiciones arriba.' : 'Probá otro filtro arriba.'}</div>`);
+
+    const showHero = (state.matchGroup === 'all' || state.matchGroup === 'arg') && state.matchCompId === 'all' && !q;
     return `
-      ${state.matchGroup === 'all' || state.matchGroup === 'arg' ? renderStadiumHero(d) : ''}
-      ${renderToolbar('matchSearchInput', state.search, 'Buscar equipo, país, torneo, URBA, Top 14 o estadio...')}
+      ${showHero ? renderStadiumHero(d) : ''}
+      ${renderToolbar('matchSearchInput', state.search, 'Buscar equipo, país, Top 14 Francia, URC, SRA, URBA o estadio...')}
       <div class="filter-scroll">
         ${groupTabs.map((t) => `<button class="seg-tab ${state.matchGroup === t.id ? 'active' : ''}" data-match-group="${t.id}" type="button">${esc(t.label)}</button>`).join('')}
       </div>
-      <div class="sub-seg">
+      ${compRailHtml}
+      ${spotHtml}
+      ${!showStandings ? `<div class="sub-seg">
         ${statusTabs.map((s) => `<button class="sub-btn ${state.matchStatus === s.id ? 'active' : ''}" data-match-status="${s.id}" type="button">${esc(s.label)}</button>`).join('')}
-      </div>
+      </div>` : ''}
       ${cardsHtml}
-      ${showPulse ? renderHomePulse(d) : ''}`;
+      ${showHero ? renderHomePulse(d) : ''}`;
   }
   function renderPumasTab(d) {
     const hub = d.argentinaHub || {};
@@ -741,17 +853,49 @@
   function renderTeamsTab(d) {
     const clubsUrba = (d.urba && d.urba.clubs) || [];
     const dir = d.teamsDirectory || [];
+    const comps = d.competitions || [];
     const subTabs = [
+      { id: 'competitions', label: `Torneos (${comps.length || 12})` },
       { id: 'all', label: `Todos (${dir.length + clubsUrba.length})` },
       { id: 'ranking', label: 'Ranking & Banderas' },
-      { id: 'nations', label: 'Selecciones' },
+      { id: 'sra', label: 'Súper Rugby Américas (8)' },
       { id: 'top14', label: 'Top 14 Francia' },
+      { id: 'world_clubs', label: 'URC · Prem · SRP · EPCR' },
       { id: 'urba', label: `URBA Bs.As. (${clubsUrba.length})` },
+      { id: 'nations', label: 'Selecciones' },
       { id: 'history', label: `Historial (${(d.history || []).length})` },
     ];
 
     let bodyHtml = '';
-    if (state.teamsSubTab === 'ranking') {
+    if (state.teamsSubTab === 'competitions') {
+      const catOrder = ['Clubes', 'Copas', 'Selecciones'];
+      bodyHtml = catOrder.map((catName) => {
+        const list = comps.filter((c) => c.category === catName);
+        if (!list.length) return '';
+        return `
+          <div class="section-head" style="margin-top:8px;">
+            <h2 class="section-title" style="font-size:1.3rem;">${esc(catName === 'Copas' ? 'Copas Continentales de Clubes' : (catName === 'Clubes' ? 'Ligas Principales de Clubes' : 'Torneos de Selecciones'))}</h2>
+            <span class="section-sub">${list.length} competencias oficiales</span>
+          </div>
+          <div class="comp-grid">
+            ${list.map((c) => `
+              <button class="comp-card" data-open-comp="${esc(c.id)}" type="button">
+                <div>
+                  <div class="comp-card-kicker ${c.isArgentinaCore ? 'arg' : ''}">${esc(c.category)} · ${esc(c.region)}</div>
+                  <div class="comp-card-name" style="margin-top:4px;">${esc(c.name)}</div>
+                </div>
+                <div class="comp-card-foot">
+                  <span><strong style="color:var(--text);">${c.teamsCount} equipos</strong></span>
+                  <span aria-hidden="true">·</span>
+                  <span>${esc(c.season)}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>ID: ${esc(c.id)}</span>
+                </div>
+              </button>
+            `).join('')}
+          </div>`;
+      }).join('');
+    } else if (state.teamsSubTab === 'ranking') {
       const list = (d.rankings && d.rankings[state.rankGender]) || [];
       bodyHtml = `
         <div class="sub-seg">
@@ -818,6 +962,30 @@
           sub1: `URBA ${c.division}${c.standingsPos ? ` · #${c.standingsPos} (${c.pts} pts)` : ''}`,
           sub2: getUrbaClubLocation(c),
         }));
+      } else if (state.teamsSubTab === 'sra') {
+        cards = dir
+          .filter((t) => (t.compIds || []).includes('sa-super-rugby-americas') || (t.groups || []).includes('sra'))
+          .map((t) => ({
+            type: 'dir',
+            key: t.key,
+            name: t.name,
+            crestUrl: t.crestUrl,
+            flagUrl: t.flagUrl || 'https://flagcdn.com/w80/ar.png',
+            sub1: `Súper Rugby Américas${cleanCoach(t.coach) ? ` · DT: ${cleanCoach(t.coach)}` : ''}`,
+            sub2: t.stadium || 'Franquicia oficial SRA',
+          }));
+      } else if (state.teamsSubTab === 'world_clubs') {
+        cards = dir
+          .filter((t) => (t.compIds || []).some((cid) => ['eu-urc', 'eng-premiership', 'oce-super-rugby-pacific', 'epcr-champions-cup', 'epcr-challenge-cup'].includes(cid)))
+          .map((t) => ({
+            type: 'dir',
+            key: t.key,
+            name: t.name,
+            crestUrl: t.crestUrl,
+            flagUrl: t.flagUrl || '',
+            sub1: [(t.leagues || []).slice(0, 2).join(' · '), cleanCoach(t.coach) ? `DT: ${cleanCoach(t.coach)}` : ''].filter(Boolean).join(' · ') || 'Club Internacional',
+            sub2: t.stadium || (t.roster && t.roster.length ? `${t.roster.length} jugadores verificados` : 'Escudo y ficha oficial'),
+          }));
       } else if (state.teamsSubTab === 'top14') {
         cards = dir
           .filter((t) => (t.leagues || []).some((l) => /top 14/i.test(l) && !/urba/i.test(l)) || (t.groups || []).includes('top14'))
@@ -1192,7 +1360,35 @@
     const mgBtn = e.target.closest('[data-match-group]');
     if (mgBtn) {
       state.matchGroup = mgBtn.dataset.matchGroup;
+      state.matchCompId = 'all';
+      state.compViewMode = 'matches';
       render();
+      return;
+    }
+    const mcBtn = e.target.closest('[data-match-comp]');
+    if (mcBtn) {
+      state.matchCompId = mcBtn.dataset.matchComp;
+      state.compViewMode = 'matches';
+      render();
+      return;
+    }
+    const cvBtn = e.target.closest('[data-comp-view]');
+    if (cvBtn) {
+      state.compViewMode = cvBtn.dataset.compView;
+      render();
+      return;
+    }
+    const ocBtn = e.target.closest('[data-open-comp]');
+    if (ocBtn) {
+      const cid = ocBtn.dataset.openComp;
+      const comps = (state.data && state.data.competitions) || [];
+      const found = comps.find((x) => x.id === cid);
+      state.matchCompId = cid;
+      state.compViewMode = (found && found.matchesCount === 0 && found.standings && found.standings.length) ? 'standings' : 'matches';
+      if (found) {
+        state.matchGroup = found.category === 'Copas' ? 'cat-copas' : (found.category === 'Clubes' ? 'cat-clubes' : 'cat-selecciones');
+      }
+      setTab('matches');
       return;
     }
     const msBtn = e.target.closest('[data-match-status]');

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Rugby Pro — Los Pumas, URBA Buenos Aires, Top 14, Mundiales &amp; Seven</title>
-  <meta name="description" content="Todo el rugby en una app: Los Pumas XV y 7s, 99 clubes de Buenos Aires (URBA Top 14 a Desarrollo), Top 14 Francia, Naciones, Mundiales, Seven SVNS, banderas y escudos oficiales." />
+  <meta name="description" content="Todo el rugby en una app: Los Pumas XV y 7s, 99 clubes de Buenos Aires (URBA Top 14 a Desarrollo), Top 14 Francia, URC, Premiership, Super Rugby Pacific, Súper Rugby Américas, Champions Cup, Challenge Cup, Rugby Championship, Seis Naciones y Mundial, banderas y escudos oficiales." />
   <meta name="theme-color" content="#070b0f" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -1277,6 +1277,138 @@
       .sheet-score-name { font-size: 0.96rem; }
     }
 
+
+    /* Global Competitions Directory & Standings v3.2.0 */
+    .comp-rail {
+      display: flex;
+      align-items: stretch;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 6px;
+      margin-bottom: 10px;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+    }
+    .comp-rail::-webkit-scrollbar { display: none; }
+    .comp-btn {
+      min-height: 48px;
+      min-width: max-content;
+      padding: 8px 13px;
+      border-radius: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      text-align: left;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 2px;
+      flex-shrink: 0;
+      transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .comp-btn:hover { background: var(--surface-2); border-color: var(--border-strong); }
+    .comp-btn.active {
+      background: var(--surface-3);
+      border-color: var(--border-strong);
+      box-shadow: 0 0 0 1px rgba(229, 184, 92, 0.25);
+    }
+    .comp-btn-title {
+      font-size: 0.81rem;
+      font-weight: 700;
+      color: var(--text);
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .comp-btn.active .comp-btn-title { color: var(--gold); }
+    .comp-btn-meta {
+      font-size: 0.69rem;
+      color: var(--text-dim);
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    .comp-spotlight {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .comp-spot-top {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px 16px;
+    }
+    .comp-spot-title {
+      font-family: var(--font-display);
+      font-size: clamp(1.35rem, 2.5vw, 1.85rem);
+      font-weight: 800;
+      line-height: 1.04;
+      color: var(--text);
+      text-wrap: balance;
+    }
+    .comp-spot-meta {
+      margin-top: 4px;
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      font-variant-numeric: tabular-nums;
+    }
+    .comp-spot-meta strong { color: var(--gold); font-weight: 600; }
+    .comp-grid {
+      display: grid;
+      grid-template-columns: repeat(1, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    @media (min-width: 680px) {
+      .comp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (min-width: 1040px) {
+      .comp-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+    .comp-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 15px;
+      padding: 14px;
+      text-align: left;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+      min-height: 44px;
+      transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .comp-card:hover { background: var(--surface-2); border-color: var(--border-strong); transform: translateY(-1px); }
+    .comp-card-kicker {
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: var(--gold);
+      letter-spacing: 0.02em;
+    }
+    .comp-card-kicker.arg { color: var(--sky); }
+    .comp-card-name {
+      font-size: 0.94rem;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+    }
+    .comp-card-foot {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 8px;
+      font-variant-numeric: tabular-nums;
+    }
+
   </style>
 </head>
 <body>
@@ -1335,6 +1467,6 @@
     <div id="detailPanel" class="sheet-panel"></div>
   </div>
 
-  <script src="./app.js?v=3.1.1"></script>
+  <script src="./app.js?v=3.2.0"></script>
 </body>
 </html>
