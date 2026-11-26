@@ -41,6 +41,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.rugbypro.app.R
+import com.rugbypro.app.domain.model.ActiveKitRole
+import com.rugbypro.app.domain.model.AppSection
 import com.rugbypro.app.domain.model.MatchStatus
 import com.rugbypro.app.domain.model.RugbyMatch
 import com.rugbypro.app.ui.RugbyUiState
@@ -50,8 +53,10 @@ import com.rugbypro.app.ui.components.LiveStatsSection
 import com.rugbypro.app.ui.components.MatchScoreCard
 import com.rugbypro.app.ui.components.MatchTimelineSection
 import com.rugbypro.app.ui.components.PulsingLiveIndicator
+import com.rugbypro.app.ui.components.RugbyJerseyBadge
+import com.rugbypro.app.ui.components.SectionBackdropBanner
 import com.rugbypro.app.ui.components.TeamCrestWithFlag
-import com.rugbypro.app.ui.components.VerificationBadge
+import com.rugbypro.app.ui.theme.ElectricCyan
 import com.rugbypro.app.ui.theme.MetallicGold
 import com.rugbypro.app.ui.theme.PitchGreen
 import com.rugbypro.app.ui.theme.Spacing
@@ -75,15 +80,18 @@ internal fun rugbyFieldColors() = OutlinedTextFieldDefaults.colors(
     unfocusedBorderColor = MaterialTheme.colorScheme.outline
 )
 
+/**
+ * Pantalla estricta "Partidos en vivo":
+ * Muestra ÚNICAMENTE partidos en juego ahora (LIVE) y próximos partidos del día (SCHEDULED hoy).
+ * Prohibido mostrar partidos finalizados en esta sección.
+ */
 @Composable
 fun LiveMatchesScreen(
     state: RugbyUiState,
     viewModel: RugbyViewModel
 ) {
     val live = state.liveMatches
-    val upcoming = remember(state.dashboard) {
-        state.dashboard?.matches?.filter { it.status == MatchStatus.SCHEDULED }?.take(8).orEmpty()
-    }
+    val upcomingToday = state.upcomingTodayMatches
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -91,70 +99,84 @@ fun LiveMatchesScreen(
         verticalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
         item {
-            GlassCard(highlightAccent = live.isNotEmpty()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Centro de Partidos en Vivo",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "Actualización automática cada ${state.config.liveRefreshSec} s · Cascada oficial + ESPN",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+            SectionBackdropBanner(
+                backgroundRes = R.drawable.bg_rugby_action,
+                eyebrow = "Tiempo Real",
+                title = "Partidos en vivo",
+                subtitle = "Actualización automática cada ${state.config.liveRefreshSec} s · Partidos activos y agenda de hoy",
+                trailing = {
                     if (live.isNotEmpty()) PulsingLiveIndicator()
                 }
-            }
+            )
         }
 
-        if (live.isEmpty()) {
+        if (live.isEmpty() && upcomingToday.isEmpty()) {
             item {
                 GlassCard {
                     Text(
-                        text = "Sin partidos en vivo en este momento",
+                        text = "Sin partidos en vivo ni programados para hoy",
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.secondary
                     )
                     Spacer(Modifier.height(Spacing.xs))
                     Text(
-                        text = "Cuando comience un encuentro oficial verás aquí el reloj en tiempo real, tries, tarjetas, estadísticas y alertas.",
+                        text = "Cuando comience un encuentro o haya cruces programados en la fecha de hoy, verás aquí el marcador, eventos cronológicos y estadísticas en vivo.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                }
-            }
-            if (upcoming.isNotEmpty()) {
-                item {
-                    Text(
-                        text = "Próximos partidos en agenda",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                }
-                items(upcoming, key = { it.id }) { m ->
-                    MatchScoreCard(match = m, onClick = { viewModel.openMatchDetail(m) })
+                    Spacer(Modifier.height(Spacing.md))
+                    OutlinedButton(
+                        onClick = { viewModel.selectSection(AppSection.FIXTURE) },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                    ) {
+                        Text("Ver agenda completa y resultados en Fixture")
+                    }
                 }
             }
         } else {
-            items(live, key = { it.id }) { m ->
-                Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                    MatchScoreCard(match = m, onClick = { viewModel.openMatchDetail(m) })
+            if (live.isEmpty()) {
+                item {
                     GlassCard {
-                        Text("Cronología de eventos", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.height(Spacing.sm))
-                        MatchTimelineSection(m.events)
-                        Spacer(Modifier.height(Spacing.md))
-                        Text("Estadísticas en vivo", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.secondary)
-                        Spacer(Modifier.height(Spacing.sm))
-                        LiveStatsSection(m.liveStats)
+                        Text(
+                            text = "No hay encuentros jugándose en este instante",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "Debajo figuran exclusivamente los próximos partidos programados para el día de hoy.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
+                }
+            } else {
+                items(live, key = { it.id }) { m ->
+                    Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                        MatchScoreCard(match = m, onClick = { viewModel.openMatchDetail(m) })
+                        GlassCard {
+                            Text("Cronología de eventos", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.height(Spacing.sm))
+                            MatchTimelineSection(m.events)
+                            Spacer(Modifier.height(Spacing.md))
+                            Text("Estadísticas en vivo", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.secondary)
+                            Spacer(Modifier.height(Spacing.sm))
+                            LiveStatsSection(m.liveStats)
+                        }
+                    }
+                }
+            }
+
+            if (upcomingToday.isNotEmpty()) {
+                item {
+                    Text(
+                        text = "Próximos partidos de hoy (${upcomingToday.size})",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = ElectricCyan
+                    )
+                }
+                items(upcomingToday, key = { it.id }) { m ->
+                    MatchScoreCard(match = m, onClick = { viewModel.openMatchDetail(m) })
                 }
             }
         }
@@ -178,7 +200,7 @@ fun FixtureResultsScreen(
         "sevens" to "Seven 7s",
         "worldcup" to "Mundial"
     )
-    val matches = state.filteredMatches
+    val list = state.filteredMatches
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -186,67 +208,76 @@ fun FixtureResultsScreen(
         verticalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
         item {
-            OutlinedTextField(
-                value = state.fixtureQuery,
-                onValueChange = { viewModel.setFixtureFilter(query = it) },
-                label = { Text("Buscar equipo, torneo o ciudad") },
-                singleLine = true,
-                colors = rugbyFieldColors(),
-                modifier = Modifier.fillMaxWidth()
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+            ) {
+                OutlinedTextField(
+                    value = state.fixtureQuery,
+                    onValueChange = { viewModel.setFixtureFilter(query = it) },
+                    label = { Text("Equipo, torneo o sede") },
+                    singleLine = true,
+                    colors = rugbyFieldColors(),
+                    modifier = Modifier.weight(1.4f)
+                )
+                OutlinedTextField(
+                    value = state.fixtureDateQuery,
+                    onValueChange = { viewModel.setFixtureFilter(dateQuery = it) },
+                    label = { Text("Fecha (ej. 26/11)") },
+                    singleLine = true,
+                    colors = rugbyFieldColors(),
+                    modifier = Modifier.weight(1f)
+                )
+            }
             Spacer(Modifier.height(Spacing.sm))
             Row(
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
             ) {
-                groups.forEach { (key, label) ->
+                listOf(
+                    null to "Todos",
+                    MatchStatus.LIVE to "En vivo",
+                    MatchStatus.SCHEDULED to "Próximos",
+                    MatchStatus.FINISHED to "Finalizados"
+                ).forEach { (st, lbl) ->
                     FilterChip(
-                        selected = state.fixtureGroup == key,
-                        onClick = { viewModel.setFixtureFilter(group = key) },
-                        label = { Text(label) },
+                        selected = state.fixtureStatus == st,
+                        onClick = { viewModel.setFixtureFilter(status = st) },
+                        label = { Text(lbl) },
                         colors = rugbyChipColors(),
                         modifier = Modifier.heightIn(min = 48.dp)
                     )
                 }
             }
-            Spacer(Modifier.height(Spacing.xs))
-            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                FilterChip(
-                    selected = state.fixtureStatus == null,
-                    onClick = { viewModel.setFixtureFilter(status = null) },
-                    label = { Text("Todos (${state.dashboard?.matches?.size ?: 0})") },
-                    colors = rugbyChipColors(),
-                    modifier = Modifier.heightIn(min = 48.dp)
-                )
-                FilterChip(
-                    selected = state.fixtureStatus == MatchStatus.SCHEDULED,
-                    onClick = { viewModel.setFixtureFilter(status = MatchStatus.SCHEDULED) },
-                    label = { Text("Fixture") },
-                    colors = rugbyChipColors(),
-                    modifier = Modifier.heightIn(min = 48.dp)
-                )
-                FilterChip(
-                    selected = state.fixtureStatus == MatchStatus.FINISHED,
-                    onClick = { viewModel.setFixtureFilter(status = MatchStatus.FINISHED) },
-                    label = { Text("Resultados") },
-                    colors = rugbyChipColors(),
-                    modifier = Modifier.heightIn(min = 48.dp)
-                )
+            Spacer(Modifier.height(Spacing.sm))
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+            ) {
+                groups.forEach { (k, lbl) ->
+                    FilterChip(
+                        selected = state.fixtureGroup == k,
+                        onClick = { viewModel.setFixtureFilter(group = k) },
+                        label = { Text(lbl) },
+                        colors = rugbyChipColors(),
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    )
+                }
             }
         }
 
-        if (matches.isEmpty()) {
+        if (list.isEmpty()) {
             item {
                 GlassCard {
                     Text(
-                        text = "Sin datos disponibles para este filtro",
-                        style = MaterialTheme.typography.titleMedium,
+                        text = "Sin datos disponibles para los filtros actuales.",
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
         } else {
-            items(matches.take(120), key = { it.id }) { m ->
+            items(list.take(150), key = { it.id }) { m ->
                 MatchScoreCard(match = m, onClick = { viewModel.openMatchDetail(m) })
             }
         }
@@ -259,10 +290,10 @@ fun StandingsScreen(
     viewModel: RugbyViewModel
 ) {
     val dash = state.dashboard
-    var mode by remember { mutableStateOf("TABLAS") } // TABLAS | RANK_M | RANK_W
-    val tables = dash?.standings.orEmpty()
-    val activeTable = tables.firstOrNull { it.id == state.selectedStandingId } ?: tables.firstOrNull()
-    val fav = state.config.favoriteTeam.trim().lowercase()
+    val standings = dash?.standings.orEmpty()
+    val selected = standings.firstOrNull { it.id == state.selectedStandingId } ?: standings.firstOrNull()
+    var rankMode by remember { mutableStateOf("torneos") }
+    val fav = state.config.favoriteTeam.trim()
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -270,104 +301,106 @@ fun StandingsScreen(
         verticalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
         item {
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
-            ) {
-                FilterChip(
-                    selected = mode == "TABLAS",
-                    onClick = { mode = "TABLAS" },
-                    label = { Text("Tablas de Torneos") },
-                    colors = rugbyChipColors(),
-                    modifier = Modifier.heightIn(min = 48.dp)
-                )
-                FilterChip(
-                    selected = mode == "RANK_M",
-                    onClick = { mode = "RANK_M" },
-                    label = { Text("World Ranking Masc.") },
-                    colors = rugbyChipColors(),
-                    modifier = Modifier.heightIn(min = 48.dp)
-                )
-                FilterChip(
-                    selected = mode == "RANK_W",
-                    onClick = { mode = "RANK_W" },
-                    label = { Text("World Ranking Fem.") },
-                    colors = rugbyChipColors(),
-                    modifier = Modifier.heightIn(min = 48.dp)
-                )
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                listOf(
+                    "torneos" to "Tablas de Torneos",
+                    "wr_men" to "Ranking WR Masc.",
+                    "wr_women" to "Ranking WR Fem."
+                ).forEach { (k, lbl) ->
+                    FilterChip(
+                        selected = rankMode == k,
+                        onClick = { rankMode = k },
+                        label = { Text(lbl) },
+                        colors = rugbyChipColors(),
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    )
+                }
             }
         }
 
-        if (mode == "TABLAS") {
-            if (tables.isEmpty()) {
-                item {
-                    GlassCard {
-                        Text("Tablas de posiciones: Sin datos disponibles", style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            } else {
+        if (rankMode == "torneos") {
+            if (standings.isNotEmpty()) {
                 item {
                     Row(
                         modifier = Modifier.horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                     ) {
-                        tables.forEach { tbl ->
+                        standings.forEach { st ->
                             FilterChip(
-                                selected = activeTable?.id == tbl.id,
-                                onClick = { viewModel.selectStanding(tbl.id) },
-                                label = { Text(tbl.shortName) },
+                                selected = st.id == selected?.id,
+                                onClick = { viewModel.selectStanding(st.id) },
+                                label = { Text(st.shortName) },
                                 colors = rugbyChipColors(),
                                 modifier = Modifier.heightIn(min = 48.dp)
                             )
                         }
                     }
                 }
-                activeTable?.let { tbl ->
-                    item {
-                        GlassCard(highlightAccent = true) {
-                            Text(tbl.name, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
-                            Spacer(Modifier.height(Spacing.sm))
-                            Column(modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                                // Table header
+            }
+
+            if (selected == null || selected.rows.isEmpty()) {
+                item {
+                    GlassCard { Text("Sin datos disponibles para tablas.") }
+                }
+            } else {
+                item {
+                    GlassCard {
+                        Text(selected.name, style = MaterialTheme.typography.titleLarge, color = MetallicGold)
+                        Spacer(Modifier.height(Spacing.sm))
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("#", style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(24.dp))
+                            Text("Equipo", style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+                            listOf("PJ", "PG", "PE", "PP", "PF", "PC", "DIF", "B", "PTS").forEach { col ->
+                                Text(col, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(28.dp))
+                            }
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+                        selected.rows.forEachIndexed { idx, row ->
+                            val isFav = fav.isNotBlank() && row.teamName.contains(fav, ignoreCase = true)
+                            val rowBg = when {
+                                isFav -> PitchGreen.copy(alpha = 0.18f)
+                                idx % 2 == 1 -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                                else -> Color.Transparent
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(rowBg)
+                                    .padding(vertical = 8.dp, horizontal = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "${row.pos}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (row.pos <= 4) PitchGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.width(24.dp)
+                                )
                                 Row(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                                        .padding(horizontal = Spacing.sm, vertical = Spacing.sm),
+                                    modifier = Modifier.weight(1f),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("#", Modifier.width(28.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                                    Text("Equipo", Modifier.width(150.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                                    listOf("PJ", "PG", "PE", "PP", "PF", "PC", "Dif", "Bon", "Pts").forEach { col ->
-                                        Text(col, Modifier.width(40.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                                    }
+                                    TeamCrestWithFlag(row.crestUrl, row.flagUrl, row.teamName, size = 24.dp)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = row.teamName,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = if (isFav) FontWeight.Bold else FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
-                                Spacer(Modifier.height(Spacing.xs))
-                                tbl.rows.forEachIndexed { idx, r ->
-                                    val isFav = fav.isNotBlank() && r.teamName.lowercase().contains(fav)
-                                    val rowBg = when {
-                                        isFav -> PitchGreen.copy(alpha = 0.22f)
-                                        idx % 2 == 1 -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                                        else -> Color.Transparent
-                                    }
-                                    Row(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(rowBg)
-                                            .padding(horizontal = Spacing.sm, vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text("${r.pos}", Modifier.width(28.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MetallicGold)
-                                        Row(Modifier.width(150.dp), verticalAlignment = Alignment.CenterVertically) {
-                                            TeamCrestWithFlag(r.crestUrl, "", r.teamName, size = 24.dp)
-                                            Spacer(Modifier.width(6.dp))
-                                            Text(r.teamName, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        }
-                                        listOf("${r.played}", "${r.won}", "${r.drawn}", "${r.lost}", "${r.pf}", "${r.pc}", "${r.diff}", "${r.bonus}").forEach { v ->
-                                            Text(v, Modifier.width(40.dp), style = MaterialTheme.typography.labelMedium)
-                                        }
-                                        Text("${r.pts}", Modifier.width(40.dp), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = PitchGreen)
-                                    }
+                                listOf(row.played, row.won, row.drawn, row.lost, row.pf, row.pc, row.diff, row.bonus, row.pts).forEachIndexed { cIdx, v ->
+                                    Text(
+                                        text = "$v",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = if (cIdx == 8) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (cIdx == 8) MetallicGold else MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.width(28.dp)
+                                    )
                                 }
                             }
                         }
@@ -375,41 +408,40 @@ fun StandingsScreen(
                 }
             }
         } else {
-            val rows = if (mode == "RANK_M") dash?.rankingsMen.orEmpty() else dash?.rankingsWomen.orEmpty()
-            if (rows.isEmpty()) {
-                item {
-                    GlassCard {
-                        Text("Rankings World Rugby: Sin datos disponibles", style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            } else {
-                items(rows, key = { "${mode}_${it.pos}_${it.teamName}" }) { rk ->
-                    val isFav = fav.isNotBlank() && rk.teamName.lowercase().contains(fav)
-                    GlassCard(highlightAccent = isFav || rk.teamName.contains("Argentina", true)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+            val rows = if (rankMode == "wr_men") dash?.rankingsMen.orEmpty() else dash?.rankingsWomen.orEmpty()
+            items(rows, key = { "${it.pos}_${it.teamName}" }) { r ->
+                val isFav = fav.isNotBlank() && r.teamName.contains(fav, ignoreCase = true)
+                GlassCard(highlightAccent = isFav) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "#${r.pos}",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MetallicGold,
+                            modifier = Modifier.width(42.dp)
+                        )
+                        TeamCrestWithFlag(r.crestUrl, r.flagUrl, r.teamName, size = 40.dp)
+                        Spacer(Modifier.width(Spacing.md))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(r.teamName, style = MaterialTheme.typography.titleMedium)
+                            val delta = r.prevPos - r.pos
                             Text(
-                                text = "#${rk.pos}",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MetallicGold,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.width(44.dp)
-                            )
-                            TeamCrestWithFlag(rk.crestUrl, rk.flagUrl, rk.teamName, size = 40.dp)
-                            Spacer(Modifier.width(Spacing.sm))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(rk.teamName, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-                                Text(rk.abbr, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            Text(
-                                text = String.format(Locale.US, "%.2f pts", rk.points),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = PitchGreen
+                                text = when {
+                                    delta > 0 -> "Subió $delta"
+                                    delta < 0 -> "Bajó ${-delta}"
+                                    else -> "Sin cambios"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                        Text(
+                            text = String.format(Locale.US, "%.2f", r.points),
+                            style = MaterialTheme.typography.titleLarge,
+                            color = PitchGreen
+                        )
                     }
                 }
             }
@@ -425,55 +457,101 @@ fun MatchDetailDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surface,
-        titleContentColor = MaterialTheme.colorScheme.onSurface,
-        textContentColor = MaterialTheme.colorScheme.onSurface,
         title = {
             Column {
-                Text("${match.homeName} vs ${match.awayName}", style = MaterialTheme.typography.titleLarge)
-                Text("${match.leagueName} · ${match.dateArg}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
+                Text(match.leagueName, style = MaterialTheme.typography.titleMedium, color = MetallicGold)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "${match.homeName} ${match.homeScore ?: "-"} : ${match.awayScore ?: "-"} ${match.awayName}",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
             }
         },
         text = {
             Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(Spacing.md)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    VerificationBadge(match.verificationStatus)
-                    if (match.homeScore != null && match.awayScore != null) {
-                        Text(
-                            text = "${match.homeScore} - ${match.awayScore}",
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = PitchGreen
-                        )
+                    Text(
+                        "${match.dateArg} · ${match.periodDisplay}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                // Escudos, banderas y camiseta oficial Titular / Suplente en el cruce
+                GlassCard {
+                    Text("Indumentaria y Equipos", style = MaterialTheme.typography.titleMedium, color = MetallicGold)
+                    Spacer(Modifier.height(Spacing.sm))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                            TeamCrestWithFlag(match.homeCrestUrl, match.homeFlagUrl, match.homeName, size = 44.dp)
+                            Spacer(Modifier.height(6.dp))
+                            Text(match.homeName, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(6.dp))
+                            RugbyJerseyBadge(kit = match.homeKit, size = 34.dp)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = if (match.homeActiveKitRole != ActiveKitRole.UNKNOWN) {
+                                    "Juega con ${match.homeActiveKitRole.label}"
+                                } else {
+                                    "Información no disponible"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (match.homeActiveKitRole != ActiveKitRole.UNKNOWN) PitchGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(Modifier.width(Spacing.sm))
+                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                            TeamCrestWithFlag(match.awayCrestUrl, match.awayFlagUrl, match.awayName, size = 44.dp)
+                            Spacer(Modifier.height(6.dp))
+                            Text(match.awayName, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(6.dp))
+                            RugbyJerseyBadge(kit = match.awayKit, size = 34.dp)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = if (match.awayActiveKitRole != ActiveKitRole.UNKNOWN) {
+                                    "Juega con ${match.awayActiveKitRole.label}"
+                                } else {
+                                    "Información no disponible"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (match.awayActiveKitRole == ActiveKitRole.AWAY) MetallicGold else if (match.awayActiveKitRole == ActiveKitRole.HOME) PitchGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
-                Text(
-                    text = "Fuentes consultadas: ${match.verifiedSources.joinToString(", ").ifBlank { "Caché local" }}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                val venue = listOf(match.venueName, match.venueCity).filter { it.isNotBlank() }.joinToString(" · ")
-                Text(
-                    text = "Sede: ${venue.ifBlank { "Sin datos disponibles" }}",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
-                Text("Eventos del partido", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+
+                if (match.venueName.isNotBlank() || match.venueCity.isNotBlank()) {
+                    Text(
+                        text = "Estadio: ${listOf(match.venueName, match.venueCity).filter { it.isNotBlank() }.joinToString(", ")}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                HorizontalDivider()
+                Text("Cronología del partido", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
                 MatchTimelineSection(match.events)
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+
+                HorizontalDivider()
                 Text("Estadísticas en vivo", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.secondary)
                 LiveStatsSection(match.liveStats)
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cerrar")
-            }
+            TextButton(onClick = onDismiss) { Text("Cerrar") }
         }
     )
 }

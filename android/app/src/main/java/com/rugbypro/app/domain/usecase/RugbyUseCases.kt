@@ -1,34 +1,42 @@
 package com.rugbypro.app.domain.usecase
 
+import com.rugbypro.app.domain.model.ActiveKitRole
 import com.rugbypro.app.domain.model.LiveNotificationAlert
 import com.rugbypro.app.domain.model.MatchEventType
 import com.rugbypro.app.domain.model.MatchStatus
 import com.rugbypro.app.domain.model.PlayerComparisonResult
 import com.rugbypro.app.domain.model.PlayerProfile
+import com.rugbypro.app.domain.model.PlayerSearchEntry
 import com.rugbypro.app.domain.model.RugbyMatch
 import com.rugbypro.app.domain.model.TeamComparisonResult
+import com.rugbypro.app.domain.model.TeamKit
 import com.rugbypro.app.domain.model.TeamProfile
 import com.rugbypro.app.domain.model.VerificationStatus
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
+import kotlin.math.sqrt
 
 object CrossVerifyMatchesUseCase {
-    fun normalizeTeam(raw: String): String {
-        return raw.lowercase()
-            .replace("á", "a").replace("é", "e").replace("í", "i")
-            .replace("ó", "o").replace("ú", "u").replace("ñ", "n")
-            .replace(Regex("[^a-z0-9]"), "")
-    }
 
-    fun matchSignature(m: RugbyMatch): String {
-        val a = normalizeTeam(m.homeName)
-        val b = normalizeTeam(m.awayName)
-        val pair = if (a <= b) "${a}_$b" else "${b}_$a"
-        return "${m.dayArg}_$pair"
+    fun normalizeTeam(name: String): String = name.lowercase()
+        .replace(Regex("[^a-z0-9]"), "")
+        .replace("rugby", "")
+        .replace("club", "")
+        .replace("7s", "")
+        .take(16)
+
+    fun matchSignature(match: RugbyMatch): String {
+        val h = normalizeTeam(match.homeName)
+        val a = normalizeTeam(match.awayName)
+        val day = match.dateArg.take(10).ifBlank { match.dayArg.take(10) }
+        return "${h}_vs_${a}_$day"
     }
 
     /**
-     * Cross-validates primary matches against secondary live feeds.
-     * Two independent sources agreeing on score & status -> VERIFIED.
-     * Otherwise preserves PENDING_VERIFICATION (or LOCAL_CACHE when offline).
+     * Validación cruzada interna entre niveles de datos:
+     * Si dos fuentes independientes coinciden en marcador y estado -> VERIFIED.
      */
     fun execute(
         primary: List<RugbyMatch>,
@@ -83,6 +91,7 @@ object CrossVerifyMatchesUseCase {
                 merged.add(extra.copy(verificationStatus = VerificationStatus.PENDING_VERIFICATION))
             }
         }
+
         return merged.sortedWith(
             compareBy<RugbyMatch> {
                 when (it.status) {
@@ -95,14 +104,112 @@ object CrossVerifyMatchesUseCase {
     }
 }
 
+/**
+ * Regla estricta de Partidos en Vivo:
+ * Solo devuelve partidos jugándose ahora (LIVE) o próximos a jugarse en el día actual (SCHEDULED hoy).
+ * Prohibido incluir partidos FINALIZADOS.
+ */
+object FilterLiveAndTodayMatchesUseCase {
+    private fun todayKeysArg(nowMs: Long): Set<String> {
+        val tz = TimeZone.getTimeZone("America/Argentina/Buenos_Aires")
+        val d = Date(nowMs)
+        val iso = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = tz }.format(d)
+        val latam = SimpleDateFormat("dd/MM/yyyy", Locale.US).apply { timeZone = tz }.format(d)
+        val shortDm = SimpleDateFormat("dd/MM", Locale.US).apply { timeZone = tz }.format(d)
+        return setOf(iso, latam, shortDm)
+    }
+
+    fun isScheduledToday(match: RugbyMatch, nowMs: Long = System.currentTimeMillis()): Boolean {
+        if (match.status != MatchStatus.SCHEDULED) return false
+        val keys = todayKeysArg(nowMs)
+        val hay = "${match.dateArg} ${match.dayArg}".trim()
+        if (keys.any { k -> hay.contains(k, ignoreCase = true) }) return true
+        if (match.timestampSec > 0L) {
+            val tz = TimeZone.getTimeZone("America/Argentina/Buenos_Aires")
+            val matchDay = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = tz }
+                .format(Date(match.timestampSec * 1000L))
+            val todayIso = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = tz }
+                .format(Date(nowMs))
+            return matchDay == todayIso
+        }
+        return false
+    }
+
+    fun liveNow(matches: List<RugbyMatch>): List<RugbyMatch> =
+        matches.filter { it.status == MatchStatus.LIVE }
+
+    fun upcomingToday(matches: List<RugbyMatch>, nowMs: Long = System.currentTimeMillis()): List<RugbyMatch> =
+        matches.filter { it.status == MatchStatus.SCHEDULED && isScheduledToday(it, nowMs) }
+            .sortedBy { it.timestampSec }
+}
+
+object ResolveMatchKitsUseCase {
+    private fun parseRgb(hex: String?): Triple<Int, Int, Int>? {
+        if (hex.isNullOrBlank()) return null
+        val clean = hex.trim().removePrefix("#")
+        if (clean.length != 6) return null
+        return runCatching {
+            Triple(
+                clean.substring(0, 2).toInt(16),
+                clean.substring(2, 4).toInt(16),
+                clean.substring(4, 6).toInt(16)
+            )
+        }.getOrNull()
+    }
+
+    private fun colorDistance(hexA: String?, hexB: String?): Double {
+        val a = parseRgb(hexA) ?: return 999.0
+        val b = parseRgb(hexB) ?: return 999.0
+        val dr = (a.first - b.first).toDouble()
+        val dg = (a.second - b.second).toDouble()
+        val db = (a.third - b.third).toDouble()
+        return sqrt(dr * dr + dg * dg + db * db)
+    }
+
+    fun resolveForMatch(
+        homeTeam: TeamProfile?,
+        awayTeam: TeamProfile?
+    ): ResolvedMatchKits {
+        val hHome = homeTeam?.homeKit
+        val aHome = awayTeam?.homeKit
+        val aAway = awayTeam?.awayKit
+
+        val homeRole = if (hHome != null && hHome.verified) ActiveKitRole.HOME else ActiveKitRole.UNKNOWN
+        val clash = hHome != null && aHome != null && colorDistance(hHome.primaryHex, aHome.primaryHex) < 115.0
+
+        val (awayRole, activeAwayKit) = when {
+            clash && aAway != null && aAway.verified -> ActiveKitRole.AWAY to aAway
+            aHome != null && aHome.verified -> ActiveKitRole.HOME to aHome
+            aAway != null && aAway.verified -> ActiveKitRole.AWAY to aAway
+            else -> ActiveKitRole.UNKNOWN to null
+        }
+
+        return ResolvedMatchKits(
+            homeKit = hHome?.takeIf { it.verified },
+            awayKit = activeAwayKit,
+            homeRole = homeRole,
+            awayRole = awayRole
+        )
+    }
+
+    data class ResolvedMatchKits(
+        val homeKit: TeamKit?,
+        val awayKit: TeamKit?,
+        val homeRole: ActiveKitRole,
+        val awayRole: ActiveKitRole
+    )
+}
+
 object FilterMatchesUseCase {
     fun execute(
         matches: List<RugbyMatch>,
         groupFilter: String?,
         statusFilter: MatchStatus?,
-        query: String
+        query: String,
+        dateQuery: String = ""
     ): List<RugbyMatch> {
         val q = query.trim().lowercase()
+        val dq = dateQuery.trim().lowercase()
         return matches.filter { m ->
             val matchGroup = groupFilter.isNullOrBlank() ||
                 groupFilter == "todos" ||
@@ -116,8 +223,75 @@ object FilterMatchesUseCase {
                 m.awayName.lowercase().contains(q) ||
                 m.leagueName.lowercase().contains(q) ||
                 m.venueCity.lowercase().contains(q)
-            matchGroup && matchStatus && matchQuery
+            val matchDate = dq.isEmpty() ||
+                m.dateArg.lowercase().contains(dq) ||
+                m.dayArg.lowercase().contains(dq)
+            matchGroup && matchStatus && matchQuery && matchDate
         }
+    }
+}
+
+object SearchTeamsAndPlayersUseCase {
+    fun searchTeams(
+        teams: List<TeamProfile>,
+        query: String,
+        countryOrGroupFilter: String = "Todos"
+    ): List<TeamProfile> {
+        val q = query.trim().lowercase()
+        val f = countryOrGroupFilter.trim().lowercase()
+        return teams.filter { t ->
+            val matchCountry = f == "todos" || f.isEmpty() ||
+                t.name.lowercase().contains(f) ||
+                t.groups.any { it.equals(f, true) } ||
+                t.leagues.any { it.lowercase().contains(f) }
+            val matchQuery = q.isEmpty() ||
+                t.name.lowercase().contains(q) ||
+                t.coach.lowercase().contains(q) ||
+                t.division.lowercase().contains(q)
+            matchCountry && matchQuery
+        }
+    }
+
+    fun searchPlayers(
+        teams: List<TeamProfile>,
+        query: String,
+        countryFilter: String = "Todos",
+        teamFilter: String = "Todos",
+        positionFilter: String = "Todas"
+    ): List<PlayerSearchEntry> {
+        val q = query.trim().lowercase()
+        val cf = countryFilter.trim().lowercase()
+        val tf = teamFilter.trim().lowercase()
+        val pf = positionFilter.trim().lowercase()
+
+        val result = mutableListOf<PlayerSearchEntry>()
+        for (t in teams) {
+            if (tf != "todos" && tf.isNotEmpty() && !t.name.equals(teamFilter, ignoreCase = true)) continue
+            for (p in t.roster) {
+                val nat = (p.nationality ?: t.name).lowercase()
+                val matchCountry = cf == "todos" || cf.isEmpty() || nat.contains(cf) || t.name.lowercase().contains(cf)
+                val matchPos = pf == "todas" || pf.isEmpty() ||
+                    p.position.lowercase().contains(pf) ||
+                    p.posCode.lowercase().contains(pf)
+                val matchQuery = q.isEmpty() ||
+                    p.name.lowercase().contains(q) ||
+                    p.position.lowercase().contains(q) ||
+                    t.name.lowercase().contains(q) ||
+                    p.jersey.lowercase() == q
+                if (matchCountry && matchPos && matchQuery) {
+                    result.add(
+                        PlayerSearchEntry(
+                            teamKey = t.key,
+                            teamName = t.name,
+                            teamCrestUrl = t.crestUrl,
+                            teamFlagUrl = p.nationalityFlagUrl ?: t.flagUrl,
+                            player = p
+                        )
+                    )
+                }
+            }
+        }
+        return result
     }
 }
 
@@ -171,10 +345,19 @@ object CompareTeamsUseCase {
 object ComparePlayersUseCase {
     fun execute(
         leftTeam: String,
+        leftFlagUrl: String,
         left: PlayerProfile,
         rightTeam: String,
+        rightFlagUrl: String,
         right: PlayerProfile
-    ): PlayerComparisonResult = PlayerComparisonResult(leftTeam, left, rightTeam, right)
+    ): PlayerComparisonResult = PlayerComparisonResult(
+        leftTeam = leftTeam,
+        leftFlagUrl = leftFlagUrl,
+        left = left,
+        rightTeam = rightTeam,
+        rightFlagUrl = rightFlagUrl,
+        right = right
+    )
 }
 
 object DetectKeyLiveEventsUseCase {
@@ -187,7 +370,6 @@ object DetectKeyLiveEventsUseCase {
     ): List<LiveNotificationAlert> {
         val prevById = previous.associateBy { it.id }
         val alerts = mutableListOf<LiveNotificationAlert>()
-
         for (cur in current) {
             val prev = prevById[cur.id]
             val scoreHeader = "${cur.homeName} ${cur.homeScore ?: 0} - ${cur.awayScore ?: 0} ${cur.awayName}"

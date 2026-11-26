@@ -10,13 +10,16 @@ import com.rugbypro.app.domain.model.MatchStatus
 import com.rugbypro.app.domain.model.NewsArticle
 import com.rugbypro.app.domain.model.PlayerComparisonResult
 import com.rugbypro.app.domain.model.PlayerProfile
+import com.rugbypro.app.domain.model.PlayerSearchEntry
 import com.rugbypro.app.domain.model.RugbyDashboard
 import com.rugbypro.app.domain.model.RugbyMatch
 import com.rugbypro.app.domain.model.TeamComparisonResult
 import com.rugbypro.app.domain.model.TeamProfile
 import com.rugbypro.app.domain.usecase.ComparePlayersUseCase
 import com.rugbypro.app.domain.usecase.CompareTeamsUseCase
+import com.rugbypro.app.domain.usecase.FilterLiveAndTodayMatchesUseCase
 import com.rugbypro.app.domain.usecase.FilterMatchesUseCase
+import com.rugbypro.app.domain.usecase.SearchTeamsAndPlayersUseCase
 import com.rugbypro.app.live.LiveMatchTracker
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,20 +31,28 @@ data class RugbyUiState(
     val isLoading: Boolean = true,
     val isSyncing: Boolean = false,
     val currentSection: AppSection = AppSection.INICIO,
-    val dashboard: RugbyDashboard? = null,
     val config: AppConfig = AppConfig(),
+    val dashboard: RugbyDashboard? = null,
     val fixtureGroup: String = "todos",
     val fixtureStatus: MatchStatus? = null,
     val fixtureQuery: String = "",
+    val fixtureDateQuery: String = "",
     val selectedStandingId: String = "",
     val teamQuery: String = "",
     val teamGroupFilter: String = "todos",
     val selectedTeam: TeamProfile? = null,
+    val selectedPlayer: PlayerSearchEntry? = null,
+    // Comparación con buscador multi-filtro
+    val compareMode: String = "teams", // "teams" | "players"
+    val compareQuery: String = "",
+    val compareCountryFilter: String = "Todos",
+    val compareTeamFilter: String = "Todos",
+    val comparePositionFilter: String = "Todas",
     val compareTeamA: TeamProfile? = null,
     val compareTeamB: TeamProfile? = null,
     val teamComparison: TeamComparisonResult? = null,
-    val comparePlayerA: Pair<String, PlayerProfile>? = null,
-    val comparePlayerB: Pair<String, PlayerProfile>? = null,
+    val comparePlayerA: PlayerSearchEntry? = null,
+    val comparePlayerB: PlayerSearchEntry? = null,
     val playerComparison: PlayerComparisonResult? = null,
     val newsCategory: String = "Todas",
     val showSavedNewsOnly: Boolean = false,
@@ -53,14 +64,37 @@ data class RugbyUiState(
             matches = dashboard?.matches.orEmpty(),
             groupFilter = fixtureGroup,
             statusFilter = fixtureStatus,
-            query = fixtureQuery
+            query = fixtureQuery,
+            dateQuery = fixtureDateQuery
         )
 
+    // Estrictamente SOLO partidos en vivo ahora (nunca finalizados)
     val liveMatches: List<RugbyMatch>
-        get() = dashboard?.matches?.filter { it.status == MatchStatus.LIVE }.orEmpty()
+        get() = FilterLiveAndTodayMatchesUseCase.liveNow(dashboard?.matches.orEmpty())
+
+    // Estrictamente SOLO partidos próximos a jugarse hoy (nunca finalizados)
+    val upcomingTodayMatches: List<RugbyMatch>
+        get() = FilterLiveAndTodayMatchesUseCase.upcomingToday(dashboard?.matches.orEmpty())
+
+    val playerSearchResults: List<PlayerSearchEntry>
+        get() = SearchTeamsAndPlayersUseCase.searchPlayers(
+            teams = dashboard?.teams.orEmpty(),
+            query = compareQuery,
+            countryFilter = compareCountryFilter,
+            teamFilter = compareTeamFilter,
+            positionFilter = comparePositionFilter
+        )
+
+    val teamSearchResults: List<TeamProfile>
+        get() = SearchTeamsAndPlayersUseCase.searchTeams(
+            teams = dashboard?.teams.orEmpty(),
+            query = compareQuery,
+            countryOrGroupFilter = compareCountryFilter
+        )
 }
 
 class RugbyViewModel(app: Application) : AndroidViewModel(app) {
+
     private val repository = RugbyRepositoryImpl(app)
     private val tracker = LiveMatchTracker(app, repository)
 
@@ -96,10 +130,15 @@ class RugbyViewModel(app: Application) : AndroidViewModel(app) {
                 CompareTeamsUseCase.execute(teamA, teamB, dash.matches)
             } else null
 
-            val pA = cur.comparePlayerA ?: teamsWithRoster.firstOrNull()?.let { t -> t.roster.firstOrNull()?.let { t.name to it } }
-            val pB = cur.comparePlayerB ?: teamsWithRoster.drop(1).firstOrNull()?.let { t -> t.roster.firstOrNull()?.let { t.name to it } }
+            val allEntries = teamsWithRoster.flatMap { t ->
+                t.roster.map { p ->
+                    PlayerSearchEntry(t.key, t.name, t.crestUrl, p.nationalityFlagUrl ?: t.flagUrl, p)
+                }
+            }
+            val pA = cur.comparePlayerA ?: allEntries.firstOrNull { it.teamName.contains("Argentina", true) } ?: allEntries.firstOrNull()
+            val pB = cur.comparePlayerB ?: allEntries.firstOrNull { it.teamName != pA?.teamName } ?: allEntries.getOrNull(1)
             val compPlayer = if (pA != null && pB != null) {
-                ComparePlayersUseCase.execute(pA.first, pA.second, pB.first, pB.second)
+                ComparePlayersUseCase.execute(pA.teamName, pA.teamFlagUrl, pA.player, pB.teamName, pB.teamFlagUrl, pB.player)
             } else null
 
             cur.copy(
@@ -131,24 +170,35 @@ class RugbyViewModel(app: Application) : AndroidViewModel(app) {
                     it.copy(
                         isSyncing = false,
                         snackbarMessage = if (updated.isOfflineFallback) {
-                            "Modo offline: usando caché local"
+                            "Modo sin conexión — mostrando datos guardados"
                         } else {
-                            "Fuentes verificadas actualizadas"
+                            "Marcadores y planteles actualizados"
                         }
                     )
                 }
             }.onFailure {
-                _uiState.update { it.copy(isSyncing = false, snackbarMessage = "Sin conexión: datos locales activos") }
+                _uiState.update {
+                    it.copy(
+                        isSyncing = false,
+                        snackbarMessage = "Sin conexión — datos guardados activos"
+                    )
+                }
             }
         }
     }
 
-    fun setFixtureFilter(group: String? = null, status: MatchStatus? = _uiState.value.fixtureStatus, query: String? = null) {
+    fun setFixtureFilter(
+        group: String? = null,
+        status: MatchStatus? = _uiState.value.fixtureStatus,
+        query: String? = null,
+        dateQuery: String? = null
+    ) {
         _uiState.update {
             it.copy(
                 fixtureGroup = group ?: it.fixtureGroup,
                 fixtureStatus = status,
-                fixtureQuery = query ?: it.fixtureQuery
+                fixtureQuery = query ?: it.fixtureQuery,
+                fixtureDateQuery = dateQuery ?: it.fixtureDateQuery
             )
         }
     }
@@ -170,19 +220,52 @@ class RugbyViewModel(app: Application) : AndroidViewModel(app) {
         _uiState.update { it.copy(selectedTeam = team) }
     }
 
+    fun openPlayerDetail(entry: PlayerSearchEntry?) {
+        _uiState.update { it.copy(selectedPlayer = entry) }
+    }
+
+    fun openPlayerFromTeam(team: TeamProfile, player: PlayerProfile) {
+        _uiState.update {
+            it.copy(
+                selectedPlayer = PlayerSearchEntry(
+                    teamKey = team.key,
+                    teamName = team.name,
+                    teamCrestUrl = team.crestUrl,
+                    teamFlagUrl = player.nationalityFlagUrl ?: team.flagUrl,
+                    player = player
+                )
+            )
+        }
+    }
+
     fun openMatchDetail(match: RugbyMatch?) {
         _uiState.update { it.copy(selectedMatchDetail = match) }
     }
 
-    fun cycleCompareTeams(isLeft: Boolean) {
-        val teams = _uiState.value.dashboard?.teams.orEmpty()
-        if (teams.size < 2) return
-        val cur = if (isLeft) _uiState.value.compareTeamA else _uiState.value.compareTeamB
-        val idx = teams.indexOfFirst { it.key == cur?.key }
-        val next = teams[(idx + 1) % teams.size]
+    fun setCompareMode(mode: String) {
+        _uiState.update { it.copy(compareMode = mode) }
+    }
+
+    fun setCompareFilters(
+        query: String? = null,
+        country: String? = null,
+        team: String? = null,
+        position: String? = null
+    ) {
+        _uiState.update {
+            it.copy(
+                compareQuery = query ?: it.compareQuery,
+                compareCountryFilter = country ?: it.compareCountryFilter,
+                compareTeamFilter = team ?: it.compareTeamFilter,
+                comparePositionFilter = position ?: it.comparePositionFilter
+            )
+        }
+    }
+
+    fun assignCompareTeam(isLeft: Boolean, team: TeamProfile) {
         _uiState.update { state ->
-            val a = if (isLeft) next else state.compareTeamA ?: teams[0]
-            val b = if (!isLeft) next else state.compareTeamB ?: teams[1]
+            val a = if (isLeft) team else state.compareTeamA ?: team
+            val b = if (!isLeft) team else state.compareTeamB ?: team
             state.copy(
                 compareTeamA = a,
                 compareTeamB = b,
@@ -191,20 +274,17 @@ class RugbyViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun cycleComparePlayers(isLeft: Boolean) {
-        val pool = _uiState.value.dashboard?.teams.orEmpty()
-            .flatMap { t -> t.roster.map { p -> t.name to p } }
-        if (pool.size < 2) return
-        val cur = if (isLeft) _uiState.value.comparePlayerA else _uiState.value.comparePlayerB
-        val idx = pool.indexOfFirst { it.second.name == cur?.second?.name }
-        val next = pool[(idx + 1) % pool.size]
+    fun assignComparePlayer(isLeft: Boolean, entry: PlayerSearchEntry) {
         _uiState.update { state ->
-            val a = if (isLeft) next else state.comparePlayerA ?: pool[0]
-            val b = if (!isLeft) next else state.comparePlayerB ?: pool[1]
+            val a = if (isLeft) entry else state.comparePlayerA ?: entry
+            val b = if (!isLeft) entry else state.comparePlayerB ?: entry
             state.copy(
                 comparePlayerA = a,
                 comparePlayerB = b,
-                playerComparison = ComparePlayersUseCase.execute(a.first, a.second, b.first, b.second)
+                playerComparison = ComparePlayersUseCase.execute(
+                    a.teamName, a.teamFlagUrl, a.player,
+                    b.teamName, b.teamFlagUrl, b.player
+                )
             )
         }
     }
@@ -228,7 +308,7 @@ class RugbyViewModel(app: Application) : AndroidViewModel(app) {
                     dashboard = dash.copy(
                         news = dash.news.map { it.copy(savedOffline = it.id in savedIds) }
                     ),
-                    snackbarMessage = if (article.id in savedIds) "Noticia guardada para leer offline" else "Quitada de guardadas"
+                    snackbarMessage = if (article.id in savedIds) "Noticia guardada para leer sin conexión" else "Quitada de guardadas"
                 )
             }
         }

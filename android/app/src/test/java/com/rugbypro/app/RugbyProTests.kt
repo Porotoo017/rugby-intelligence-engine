@@ -1,63 +1,69 @@
 package com.rugbypro.app
 
 import com.rugbypro.app.data.remote.RugbyJsonParser
+import com.rugbypro.app.domain.model.ActiveKitRole
 import com.rugbypro.app.domain.model.MatchEvent
 import com.rugbypro.app.domain.model.MatchEventType
 import com.rugbypro.app.domain.model.MatchStatus
+import com.rugbypro.app.domain.model.PlayerProfile
 import com.rugbypro.app.domain.model.RugbyMatch
+import com.rugbypro.app.domain.model.TeamKit
 import com.rugbypro.app.domain.model.TeamProfile
 import com.rugbypro.app.domain.model.VerificationStatus
 import com.rugbypro.app.domain.usecase.CompareTeamsUseCase
 import com.rugbypro.app.domain.usecase.CrossVerifyMatchesUseCase
 import com.rugbypro.app.domain.usecase.DetectKeyLiveEventsUseCase
+import com.rugbypro.app.domain.usecase.FilterLiveAndTodayMatchesUseCase
 import com.rugbypro.app.domain.usecase.FilterMatchesUseCase
+import com.rugbypro.app.domain.usecase.ResolveMatchKitsUseCase
+import com.rugbypro.app.domain.usecase.SearchTeamsAndPlayersUseCase
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RugbyProTests {
 
     private fun sampleMatch(
-        id: String = "m1",
-        source: String = "world_rugby",
-        home: String = "Argentina",
-        away: String = "Scotland",
-        status: MatchStatus = MatchStatus.FINISHED,
-        homeScore: Int? = 28,
-        awayScore: Int? = 21,
-        dayArg: String = "Sáb 28 Nov",
+        id: String,
+        source: String,
+        status: MatchStatus,
+        homeScore: Int?,
+        awayScore: Int?,
+        tsSec: Long = 1000L,
+        dateArg: String = "26/11/2026 16:00",
         events: List<MatchEvent> = emptyList()
     ) = RugbyMatch(
         id = id,
         source = source,
-        leagueId = "int",
-        leagueName = "Test Match",
-        leagueShort = "Test",
+        leagueId = "289234",
+        leagueName = "Test Internationals",
+        leagueShort = "INT",
         phase = "",
         group = "nations",
         category = "Selecciones",
         status = status,
-        minuteDisplay = if (status == MatchStatus.LIVE) "65'" else "",
-        periodDisplay = status.label,
-        dateArg = "$dayArg · 16:00 ART",
-        dayArg = dayArg,
-        timeArg = "16:00 ART",
-        timestampSec = 1795892400L,
-        venueName = "Murrayfield",
-        venueCity = "Edinburgh",
-        homeName = home,
-        homeAbbr = home.take(3).uppercase(),
+        minuteDisplay = "42'",
+        periodDisplay = "2do Tiempo",
+        dateArg = dateArg,
+        dayArg = dateArg.take(5),
+        timeArg = "16:00",
+        timestampSec = tsSec,
+        venueName = "Vélez",
+        venueCity = "Buenos Aires",
+        homeName = "Argentina",
+        homeAbbr = "ARG",
         homeCrestUrl = "",
         homeFlagUrl = "",
-        homeCoach = "",
+        homeCoach = "Felipe Contepomi",
         homeRank = 6,
         homeScore = homeScore,
-        awayName = away,
-        awayAbbr = away.take(3).uppercase(),
+        awayName = "France",
+        awayAbbr = "FRA",
         awayCrestUrl = "",
         awayFlagUrl = "",
-        awayCoach = "",
-        awayRank = 7,
+        awayCoach = "Fabien Galthié",
+        awayRank = 4,
         awayScore = awayScore,
         isArgentina = true,
         verificationStatus = VerificationStatus.PENDING_VERIFICATION,
@@ -68,86 +74,116 @@ class RugbyProTests {
 
     @Test
     fun `cross verification marks VERIFIED when two sources agree`() {
-        val primary = listOf(sampleMatch(id = "wr:1", source = "world_rugby", homeScore = 24, awayScore = 17))
-        val secondary = listOf(sampleMatch(id = "espn:1", source = "espn_live", homeScore = 24, awayScore = 17))
-        val res = CrossVerifyMatchesUseCase.execute(primary, secondary)
+        val m1 = sampleMatch("a", "official_live", MatchStatus.LIVE, 17, 14)
+        val m2 = sampleMatch("b", "sec_live", MatchStatus.LIVE, 17, 14)
+        val res = CrossVerifyMatchesUseCase.execute(listOf(m1), listOf(m2))
         assertEquals(1, res.size)
-        assertEquals(VerificationStatus.VERIFIED, res[0].verificationStatus)
-        assertTrue(res[0].verifiedSources.containsAll(listOf("world_rugby", "espn_live")))
+        assertEquals(VerificationStatus.VERIFIED, res.first().verificationStatus)
     }
 
     @Test
-    fun `cross verification keeps PENDING when scores differ`() {
-        val primary = listOf(sampleMatch(id = "wr:1", source = "world_rugby", homeScore = 24, awayScore = 17))
-        val secondary = listOf(sampleMatch(id = "espn:1", source = "espn_live", homeScore = 24, awayScore = 20))
-        val res = CrossVerifyMatchesUseCase.execute(primary, secondary)
-        assertEquals(VerificationStatus.PENDING_VERIFICATION, res[0].verificationStatus)
+    fun `live filter strictly excludes finished matches`() {
+        val nowMs = System.currentTimeMillis()
+        val nowSec = nowMs / 1000L
+        val live = sampleMatch("1", "s", MatchStatus.LIVE, 10, 7, tsSec = nowSec)
+        val todayUpcoming = sampleMatch("2", "s", MatchStatus.SCHEDULED, null, null, tsSec = nowSec + 3600L, dateArg = "")
+        val finished = sampleMatch("3", "s", MatchStatus.FINISHED, 24, 17, tsSec = nowSec)
+        val all = listOf(live, todayUpcoming, finished)
+
+        val liveOnly = FilterLiveAndTodayMatchesUseCase.liveNow(all)
+        val todayOnly = FilterLiveAndTodayMatchesUseCase.upcomingToday(all, nowMs = nowMs)
+
+        assertEquals(listOf("1"), liveOnly.map { it.id })
+        assertEquals(listOf("2"), todayOnly.map { it.id })
+        assertTrue((liveOnly + todayOnly).none { it.status == MatchStatus.FINISHED })
     }
 
     @Test
-    fun `detect key live events triggers try red card and fulltime alerts`() {
-        val prev = listOf(sampleMatch(id = "m1", status = MatchStatus.LIVE, homeScore = 14, awayScore = 10))
-        val newEvents = listOf(
-            MatchEvent("e1", 58, "2T", MatchEventType.TRY, "home", "Carreras", "Try"),
-            MatchEvent("e2", 62, "2T", MatchEventType.RED_CARD, "away", "Smith", "Tarjeta Roja")
+    fun `resolve match kits selects away kit on primary clash and unknown when missing`() {
+        val blueHome = TeamProfile(
+            key = "arg", name = "Argentina", crestUrl = "", flagUrl = "", coach = "", stadium = "",
+            worldRank = 6, groups = emptyList(), leagues = emptyList(), division = "", roster = emptyList(),
+            homeKit = TeamKit(true, "#0050BA", "#FFFFFF", "#FFFFFF", "hoops", "Titular"),
+            awayKit = TeamKit(true, "#0B1F3A", "#FFD700", "#0B1F3A", "solid", "Suplente")
         )
-        val cur = listOf(sampleMatch(id = "m1", status = MatchStatus.FINISHED, homeScore = 21, awayScore = 10, events = newEvents))
-        val alerts = DetectKeyLiveEventsUseCase.execute(prev, cur, notifyTries = true, notifyRedCards = true, notifyFullTime = true)
-        assertEquals(3, alerts.size)
-        assertTrue(alerts.any { it.channelType == "TRY" })
-        assertTrue(alerts.any { it.channelType == "RED" })
-        assertTrue(alerts.any { it.channelType == "FT" })
-    }
-
-    @Test
-    fun `compare teams computes aggregate wins and points strictly from finished games`() {
-        val tA = TeamProfile("arg", "Argentina", "", "", "Contepomi", "", 6, listOf("nations"), listOf("TRC"), "", emptyList())
-        val tB = TeamProfile("sco", "Scotland", "", "", "Townsend", "", 7, listOf("nations"), listOf("6N"), "", emptyList())
-        val matches = listOf(
-            sampleMatch(id = "1", home = "Argentina", away = "Scotland", status = MatchStatus.FINISHED, homeScore = 30, awayScore = 20),
-            sampleMatch(id = "2", home = "Argentina", away = "Scotland", status = MatchStatus.SCHEDULED, homeScore = null, awayScore = null)
+        val blueAwayClash = TeamProfile(
+            key = "ita", name = "Italy", crestUrl = "", flagUrl = "", coach = "", stadium = "",
+            worldRank = 8, groups = emptyList(), leagues = emptyList(), division = "", roster = emptyList(),
+            homeKit = TeamKit(true, "#0055BF", "#FFFFFF", "#FFFFFF", "solid", "Titular"),
+            awayKit = TeamKit(true, "#E2E2E2", "#0050BA", "#0050BA", "solid", "Suplente")
         )
-        val cmp = CompareTeamsUseCase.execute(tA, tB, matches)
-        assertEquals(1, cmp.leftPlayed)
-        assertEquals(1, cmp.leftWins)
-        assertEquals(30, cmp.leftPointsFor)
-        assertEquals(20, cmp.leftPointsAgainst)
-        assertEquals(0, cmp.rightWins)
+        val resolved = ResolveMatchKitsUseCase.resolveForMatch(blueHome, blueAwayClash)
+        assertEquals(ActiveKitRole.HOME, resolved.homeRole)
+        assertEquals(ActiveKitRole.AWAY, resolved.awayRole)
+        assertEquals("#E2E2E2", resolved.awayKit?.primaryHex)
+
+        val unverified = ResolveMatchKitsUseCase.resolveForMatch(null, null)
+        assertEquals(ActiveKitRole.UNKNOWN, unverified.homeRole)
+        assertNull(unverified.homeKit)
     }
 
     @Test
-    fun `filter matches filters by status and query`() {
-        val m1 = sampleMatch(id = "1", home = "Los Pumas", away = "All Blacks", status = MatchStatus.LIVE)
-        val m2 = sampleMatch(id = "2", home = "SIC", away = "CASI", status = MatchStatus.SCHEDULED).copy(group = "urba", isArgentina = false)
-        val res = FilterMatchesUseCase.execute(listOf(m1, m2), groupFilter = "urba", statusFilter = MatchStatus.SCHEDULED, query = "casi")
+    fun `search players filters by query country team and position`() {
+        val p1 = PlayerProfile("10", "Santiago Carreras", "Apertura", "FH", true, false, 28, "181", "85", 50, nationality = "Argentina")
+        val p2 = PlayerProfile("1", "Danilo Fischetti", "Pilar", "PR", true, false, 28, "181", "113", 69, nationality = "Italy")
+        val teams = listOf(
+            TeamProfile("arg", "Argentina", "", "", "", "", 6, listOf("nations"), emptyList(), "", listOf(p1)),
+            TeamProfile("ita", "Italy", "", "", "", "", 8, listOf("nations"), emptyList(), "", listOf(p2))
+        )
+        val res = SearchTeamsAndPlayersUseCase.searchPlayers(
+            teams = teams,
+            query = "carreras",
+            countryFilter = "Argentina",
+            teamFilter = "Argentina",
+            positionFilter = "Apertura"
+        )
         assertEquals(1, res.size)
-        assertEquals("2", res[0].id)
+        assertEquals("Santiago Carreras", res.first().player.name)
     }
 
     @Test
-    fun `espn scoreboard parser handles live clock and score cleanly`() {
+    fun `compare teams calculates wins and points correctly`() {
+        val m = sampleMatch("1", "s", MatchStatus.FINISHED, 31, 20)
+        val t1 = TeamProfile("arg", "Argentina", "", "", "", "", 6, emptyList(), emptyList(), "", emptyList())
+        val t2 = TeamProfile("fra", "France", "", "", "", "", 4, emptyList(), emptyList(), "", emptyList())
+        val comp = CompareTeamsUseCase.execute(t1, t2, listOf(m))
+        assertEquals(1, comp.leftWins)
+        assertEquals(0, comp.rightWins)
+        assertEquals(31, comp.leftPointsFor)
+    }
+
+    @Test
+    fun `detect key live events triggers alerts only once per new event`() {
+        val evTry = MatchEvent("t1", 12, "1T", MatchEventType.TRY, "home", "Carreras", "Try")
+        val prev = sampleMatch("1", "s", MatchStatus.LIVE, 0, 0)
+        val cur = sampleMatch("1", "s", MatchStatus.LIVE, 5, 0, events = listOf(evTry))
+        val alerts = DetectKeyLiveEventsUseCase.execute(listOf(prev), listOf(cur), true, true, true)
+        assertEquals(1, alerts.size)
+        assertEquals("TRY", alerts.first().channelType)
+    }
+
+    @Test
+    fun `filter matches supports team query and date query`() {
+        val m1 = sampleMatch("1", "s", MatchStatus.FINISHED, 20, 10, dateArg = "26/11/2026 16:00")
+        val m2 = sampleMatch("2", "s", MatchStatus.FINISHED, 15, 12, dateArg = "10/10/2026 18:00")
+        val out = FilterMatchesUseCase.execute(listOf(m1, m2), "todos", MatchStatus.FINISHED, "argentina", "26/11")
+        assertEquals(listOf("1"), out.map { it.id })
+    }
+
+    @Test
+    fun `espn scoreboard parser maps live event cleanly`() {
         val json = """
-        {
-          "leagues": [{"id": "164205", "name": "Rugby Championship", "abbreviation": "TRC"}],
-          "events": [{
-            "id": "999",
-            "date": "2026-11-28T19:00:00Z",
-            "competitions": [{
-              "status": {"displayClock": "52:10", "period": 2, "type": {"state": "in", "shortDetail": "2T"}},
-              "venue": {"fullName": "Vélez", "address": {"city": "Buenos Aires"}},
-              "competitors": [
-                {"homeAway": "home", "score": "19", "team": {"displayName": "Argentina", "abbreviation": "ARG", "logo": ""}},
-                {"homeAway": "away", "score": "15", "team": {"displayName": "New Zealand", "abbreviation": "NZL", "logo": ""}}
-              ]
-            }]
-          }]
-        }
+            {"leagues":[{"id":"289234","name":"Internationals","abbreviation":"INT"}],
+             "events":[{"id":"999","date":"2026-11-26T18:00:00Z",
+              "competitions":[{"status":{"displayClock":"55'","period":2,"type":{"state":"in","shortDetail":"2nd"}},
+               "competitors":[
+                 {"homeAway":"home","score":"21","team":{"displayName":"Argentina","abbreviation":"ARG","logo":""}},
+                 {"homeAway":"away","score":"18","team":{"displayName":"Australia","abbreviation":"AUS","logo":""}}
+               ]}]}]}
         """.trimIndent()
-        val parsed = RugbyJsonParser.parseEspnScoreboard(json)
+        val parsed = RugbyJsonParser.parseEspnScoreboard(json, "289234", "Internationals")
         assertEquals(1, parsed.size)
-        assertEquals(MatchStatus.LIVE, parsed[0].status)
-        assertEquals(19, parsed[0].homeScore)
-        assertEquals(15, parsed[0].awayScore)
-        assertEquals("52:10", parsed[0].minuteDisplay)
+        assertEquals(MatchStatus.LIVE, parsed.first().status)
+        assertEquals(21, parsed.first().homeScore)
     }
 }

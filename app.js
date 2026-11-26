@@ -359,7 +359,7 @@
             : ''}
         </div>
         <div class="pulse-news-info">
-          <div class="pulse-news-meta">${esc(n.topicLabel || n.source)} <span>· ${esc(n.source)} · ${esc(n.dateArg || '')}</span></div>
+          <div class="pulse-news-meta">${esc(n.topicLabel || 'Actualidad')} <span>· ${esc(n.dateArg || 'Hoy')}</span></div>
           <div class="pulse-news-title">${esc(n.title)}</div>
         </div>
       </a>`).join('');
@@ -782,7 +782,7 @@
       <a class="news-card" href="${esc(n.url)}" target="_blank" rel="noopener noreferrer">
         <div class="news-media">${mediaHtml}</div>
         <div class="news-body">
-          <div class="news-meta">${esc(n.source)}${esc(topicTxt)} <span>· ${esc(n.dateArg || 'Hoy')}</span></div>
+          <div class="news-meta">${esc(n.topicLabel || 'Actualidad')} <span>· ${esc(n.dateArg || 'Hoy')}</span></div>
           <h3 class="news-title">${esc(n.title)}</h3>
           ${n.summary ? `<p class="news-summary">${esc(n.summary)}</p>` : ''}
           <span class="news-link">Leer nota completa ↗</span>
@@ -801,7 +801,7 @@
         <div class="news-lead-media">${mediaHtml}</div>
         <div class="news-lead-body">
           <div>
-            <div class="news-meta">${esc(n.topicLabel || 'Destacado')} · ${esc(n.source)} <span>· ${esc(n.dateArg || 'Hoy')}</span></div>
+            <div class="news-meta">${esc(n.topicLabel || 'Destacado')} <span>· ${esc(n.dateArg || 'Hoy')}</span></div>
             <h2 class="news-lead-title" style="margin-top:8px;">${esc(n.title)}</h2>
             ${n.summary ? `<p class="news-summary" style="-webkit-line-clamp:4;margin-top:10px;font-size:0.88rem;">${esc(n.summary)}</p>` : ''}
           </div>
@@ -828,7 +828,7 @@
     const filtered = allNews.filter((n) => {
       if (state.newsCat !== 'all' && !hasTag(n, state.newsCat)) return false;
       if (q) {
-        const hay = norm(`${n.title} ${n.summary || ''} ${n.source} ${n.topicLabel || ''}`);
+        const hay = norm(`${n.title} ${n.summary || ''} ${n.topicLabel || ''}`);
         if (!hay.includes(q)) return false;
       }
       return true;

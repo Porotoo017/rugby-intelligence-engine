@@ -1,5 +1,6 @@
 package com.rugbypro.app.ui.theme
 
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
@@ -7,7 +8,6 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -19,24 +19,25 @@ import com.rugbypro.app.R
 import com.rugbypro.app.domain.model.ThemeMode
 
 val PitchDarkBg = Color(0xFF0B0F14)
-val PitchDarkSurface = Color(0xFF121922)
-val PitchDarkSurfaceAlt = Color(0xFF192431)
-val PitchDarkBorder = Color(0xFF28384A)
-
+val PitchDarkSurface = Color(0xFF121821)
+val PitchDarkCard = Color(0xFF17202C)
 val PitchGreen = Color(0xFF00C853)
-val PitchEmerald = Color(0xFF00695C)
+val DeepEmerald = Color(0xFF00695C)
 val MetallicGold = Color(0xFFFFD700)
 val PearlWhite = Color(0xFFF5F5F5)
 val ElectricCyan = Color(0xFF00E5FF)
-val LiveCrimson = Color(0xFFF43F5E)
-val PendingAmber = Color(0xFFF59E0B)
+val LiveCrimson = Color(0xFFFF3B5C)
+val PendingAmber = Color(0xFFFFB300)
+val GlassBorderDark = Color(0x38FFFFFF)
+val MutedSlate = Color(0xFF9FB0C3)
 
-val LightBg = Color(0xFFF2F6FA)
+val LightBg = Color(0xFFF4F7FA)
 val LightSurface = Color(0xFFFFFFFF)
-val LightSurfaceAlt = Color(0xFFE6EEF4)
-val LightBorder = Color(0xFFCBD8E4)
-val LightGreen = Color(0xFF007E33)
-val LightGold = Color(0xFF9C6D00)
+val LightCard = Color(0xFFE9EFF5)
+val LightGreen = Color(0xFF008A3C)
+val LightGold = Color(0xFF9C7600)
+val LightTextPrimary = Color(0xFF0B0F14)
+val LightTextMuted = Color(0xFF475569)
 
 object Spacing {
     val xs = 4.dp
@@ -46,94 +47,96 @@ object Spacing {
     val xl = 32.dp
 }
 
-@OptIn(ExperimentalTextApi::class)
-val OutfitFontFamily = FontFamily(
-    Font(
-        resId = R.font.outfit_variable,
-        weight = FontWeight.Normal,
-        variationSettings = FontVariation.Settings(FontVariation.weight(400))
-    ),
-    Font(
-        resId = R.font.outfit_variable,
-        weight = FontWeight.Medium,
-        variationSettings = FontVariation.Settings(FontVariation.weight(600))
-    ),
-    Font(
-        resId = R.font.outfit_variable,
-        weight = FontWeight.Bold,
-        variationSettings = FontVariation.Settings(FontVariation.weight(800))
-    )
-)
+private fun makeOutfitFamily(): FontFamily {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        FontFamily(
+            Font(R.font.outfit_variable, FontWeight.Normal, variationSettings = FontVariation.Settings(FontVariation.weight(400))),
+            Font(R.font.outfit_variable, FontWeight.SemiBold, variationSettings = FontVariation.Settings(FontVariation.weight(600))),
+            Font(R.font.outfit_variable, FontWeight.Bold, variationSettings = FontVariation.Settings(FontVariation.weight(700))),
+            Font(R.font.outfit_variable, FontWeight.ExtraBold, variationSettings = FontVariation.Settings(FontVariation.weight(800)))
+        )
+    } else {
+        FontFamily.SansSerif
+    }
+}
 
-@OptIn(ExperimentalTextApi::class)
-val InterFontFamily = FontFamily(
-    Font(
-        resId = R.font.inter_variable,
-        weight = FontWeight.Normal,
-        variationSettings = FontVariation.Settings(FontVariation.weight(400))
-    ),
-    Font(
-        resId = R.font.inter_variable,
-        weight = FontWeight.Medium,
-        variationSettings = FontVariation.Settings(FontVariation.weight(500))
-    ),
-    Font(
-        resId = R.font.inter_variable,
-        weight = FontWeight.Bold,
-        variationSettings = FontVariation.Settings(FontVariation.weight(700))
-    )
-)
+private fun makeInterFamily(): FontFamily {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        FontFamily(
+            Font(R.font.inter_variable, FontWeight.Normal, variationSettings = FontVariation.Settings(FontVariation.weight(400))),
+            Font(R.font.inter_variable, FontWeight.Medium, variationSettings = FontVariation.Settings(FontVariation.weight(500))),
+            Font(R.font.inter_variable, FontWeight.SemiBold, variationSettings = FontVariation.Settings(FontVariation.weight(600))),
+            Font(R.font.inter_variable, FontWeight.Bold, variationSettings = FontVariation.Settings(FontVariation.weight(700)))
+        )
+    } else {
+        FontFamily.SansSerif
+    }
+}
 
-private val DarkScheme = darkColorScheme(
+val OutfitFontFamily = makeOutfitFamily()
+val InterFontFamily = makeInterFamily()
+
+private val RugbyDarkColors = darkColorScheme(
     primary = PitchGreen,
-    onPrimary = Color(0xFF041A0D),
+    onPrimary = Color(0xFF02160A),
+    primaryContainer = DeepEmerald,
+    onPrimaryContainer = PearlWhite,
     secondary = MetallicGold,
-    onSecondary = Color(0xFF1B1400),
+    onSecondary = Color(0xFF1A1400),
     tertiary = ElectricCyan,
-    onTertiary = Color(0xFF001C22),
     background = PitchDarkBg,
     onBackground = PearlWhite,
     surface = PitchDarkSurface,
     onSurface = PearlWhite,
-    surfaceVariant = PitchDarkSurfaceAlt,
-    onSurfaceVariant = Color(0xFFB5C4D6),
-    outline = PitchDarkBorder
+    surfaceVariant = PitchDarkCard,
+    onSurfaceVariant = MutedSlate,
+    outline = GlassBorderDark,
+    error = LiveCrimson
 )
 
-private val LightScheme = lightColorScheme(
+private val RugbyLightColors = lightColorScheme(
     primary = LightGreen,
     onPrimary = Color.White,
+    primaryContainer = Color(0xFFD5F5E3),
+    onPrimaryContainer = Color(0xFF043B1B),
     secondary = LightGold,
     onSecondary = Color.White,
-    tertiary = Color(0xFF007799),
-    onTertiary = Color.White,
+    tertiary = Color(0xFF007A8C),
     background = LightBg,
-    onBackground = Color(0xFF0F172A),
+    onBackground = LightTextPrimary,
     surface = LightSurface,
-    onSurface = Color(0xFF0F172A),
-    surfaceVariant = LightSurfaceAlt,
-    onSurfaceVariant = Color(0xFF475569),
-    outline = LightBorder
+    onSurface = LightTextPrimary,
+    surfaceVariant = LightCard,
+    onSurfaceVariant = LightTextMuted,
+    outline = Color(0x280B0F14),
+    error = Color(0xFFD32F2F)
 )
 
-val RugbyTypography = Typography(
-    headlineMedium = TextStyle(
+private val RugbyTypography = Typography(
+    displaySmall = TextStyle(
+        fontFamily = OutfitFontFamily,
+        fontWeight = FontWeight.ExtraBold,
+        fontSize = 32.sp,
+        lineHeight = 36.sp,
+        letterSpacing = (-0.5).sp
+    ),
+    headlineSmall = TextStyle(
         fontFamily = OutfitFontFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 26.sp,
-        lineHeight = 32.sp
+        fontSize = 22.sp,
+        lineHeight = 28.sp
     ),
     titleLarge = TextStyle(
         fontFamily = OutfitFontFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 20.sp,
-        lineHeight = 26.sp
+        fontSize = 18.sp,
+        lineHeight = 24.sp
     ),
     titleMedium = TextStyle(
         fontFamily = OutfitFontFamily,
-        fontWeight = FontWeight.Medium,
-        fontSize = 16.sp,
-        lineHeight = 22.sp
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 15.sp,
+        lineHeight = 20.sp
     ),
     bodyMedium = TextStyle(
         fontFamily = InterFontFamily,
@@ -143,31 +146,31 @@ val RugbyTypography = Typography(
     ),
     labelMedium = TextStyle(
         fontFamily = InterFontFamily,
-        fontWeight = FontWeight.Medium,
+        fontWeight = FontWeight.SemiBold,
         fontSize = 12.sp,
-        lineHeight = 16.sp
+        lineHeight = 16.sp,
+        letterSpacing = 0.4.sp
+    ),
+    labelSmall = TextStyle(
+        fontFamily = InterFontFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = 11.sp,
+        lineHeight = 14.sp
     )
-)
-
-val ScoreDisplayStyle = TextStyle(
-    fontFamily = OutfitFontFamily,
-    fontWeight = FontWeight.Bold,
-    fontSize = 26.sp,
-    fontFeatureSettings = "tnum"
 )
 
 @Composable
 fun RugbyProTheme(
-    themeMode: ThemeMode = ThemeMode.DARK,
+    themeMode: ThemeMode,
     content: @Composable () -> Unit
 ) {
-    val isDark = when (themeMode) {
+    val useDark = when (themeMode) {
         ThemeMode.AUTO -> isSystemInDarkTheme()
         ThemeMode.DARK -> true
         ThemeMode.LIGHT -> false
     }
     MaterialTheme(
-        colorScheme = if (isDark) DarkScheme else LightScheme,
+        colorScheme = if (useDark) RugbyDarkColors else RugbyLightColors,
         typography = RugbyTypography,
         content = content
     )

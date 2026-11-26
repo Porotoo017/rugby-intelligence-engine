@@ -10,26 +10,34 @@ import com.rugbypro.app.domain.model.PlayerProfile
 import com.rugbypro.app.domain.model.RugbyDashboard
 import com.rugbypro.app.domain.model.RugbyMatch
 import com.rugbypro.app.domain.model.StandingRow
+import com.rugbypro.app.domain.model.TeamKit
 import com.rugbypro.app.domain.model.TeamProfile
 import com.rugbypro.app.domain.model.TournamentStandings
 import com.rugbypro.app.domain.model.VerificationStatus
 import com.rugbypro.app.domain.model.WorldRankingRow
+import com.rugbypro.app.domain.usecase.CrossVerifyMatchesUseCase
+import com.rugbypro.app.domain.usecase.ResolveMatchKitsUseCase
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 object RugbyJsonParser {
-    private val artZone = ZoneId.of("America/Argentina/Buenos_Aires")
-    private val argFmt = DateTimeFormatter.ofPattern("EEE dd MMM · HH:mm 'ART'", Locale("es", "AR"))
-    private val dayFmt = DateTimeFormatter.ofPattern("EEE dd MMM", Locale("es", "AR"))
-    private val timeFmt = DateTimeFormatter.ofPattern("HH:mm 'ART'", Locale("es", "AR"))
+
+    private val artZone: ZoneId = ZoneId.of("America/Argentina/Buenos_Aires")
+    private val argFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")
+    private val dayFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM")
+    private val timeFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
     fun parseEngineSnapshot(jsonStr: String, savedNewsIds: Set<String> = emptySet()): RugbyDashboard {
         val root = JSONObject(jsonStr)
-        val generatedAtArg = root.optString("generatedAtArg", "Base local")
+        val generatedAtArg = root.optString("generatedAtArg", "")
+
+        val argHub = root.optJSONObject("argentinaHub")
+        val coaches = argHub?.optJSONObject("coaches")
+        val coachXV = coaches?.optJSONObject("xv")?.optString("name", "Felipe Contepomi") ?: "Felipe Contepomi"
+        val coach7s = coaches?.optJSONObject("sevens")?.optString("name", "Santiago Gómez Cora") ?: "Santiago Gómez Cora"
 
         val comps = mutableListOf<CompetitionItem>()
         val compArr = root.optJSONArray("competitions") ?: JSONArray()
@@ -42,7 +50,7 @@ object RugbyJsonParser {
                     region = c.optString("region"),
                     category = c.optString("category"),
                     teamsCount = c.optInt("teamsCount", 0),
-                    season = c.optString("season")
+                    season = c.optString("season", "")
                 )
             )
         }
@@ -50,53 +58,12 @@ object RugbyJsonParser {
         val matches = mutableListOf<RugbyMatch>()
         val matchesArr = root.optJSONArray("matches") ?: JSONArray()
         for (i in 0 until matchesArr.length()) {
-            val m = matchesArr.optJSONObject(i) ?: continue
-            matches.add(parseSnapshotMatch(m))
+            matches.add(parseSnapshotMatch(matchesArr.optJSONObject(i) ?: continue))
         }
 
         val nextXV = root.optJSONObject("argentinaNextXV")?.let { parseSnapshotMatch(it) }
-            ?: root.optJSONObject("argentinaNext")?.let { parseSnapshotMatch(it) }
         val next7s = root.optJSONObject("argentinaNext7s")?.let { parseSnapshotMatch(it) }
 
-        val argHub = root.optJSONObject("argentinaHub")
-        val coachesObj = argHub?.optJSONObject("coaches")
-        val coachXV = coachesObj?.optString("xv", "Felipe Contepomi") ?: "Felipe Contepomi"
-        val coach7s = coachesObj?.optString("sevens", "Santiago Gómez Cora") ?: "Santiago Gómez Cora"
-
-        // Standings from URBA championships + SRA + ESPN leagues if available
-        val standingsList = mutableListOf<TournamentStandings>()
-        val urbaObj = root.optJSONObject("urba")
-        val urbaChamps = urbaObj?.optJSONArray("championships") ?: JSONArray()
-        for (i in 0 until urbaChamps.length()) {
-            val ch = urbaChamps.optJSONObject(i) ?: continue
-            val rows = parseStandingsRows(ch.optJSONArray("standings"))
-            if (rows.isNotEmpty()) {
-                standingsList.add(
-                    TournamentStandings(
-                        id = "urba_${ch.optString("id")}",
-                        name = ch.optString("name"),
-                        shortName = ch.optString("short", ch.optString("name")),
-                        group = "urba",
-                        rows = rows
-                    )
-                )
-            }
-        }
-        val sraObj = root.optJSONObject("sra")
-        val sraRows = parseStandingsRows(sraObj?.optJSONArray("standings"))
-        if (sraRows.isNotEmpty()) {
-            standingsList.add(
-                TournamentStandings(
-                    id = "sra",
-                    name = "Súper Rugby Américas",
-                    shortName = "SRA",
-                    group = "sra",
-                    rows = sraRows
-                )
-            )
-        }
-
-        // Teams directory + URBA clubs merged cleanly
         val teamsMap = linkedMapOf<String, TeamProfile>()
         val dirArr = root.optJSONArray("teamsDirectory") ?: JSONArray()
         for (i in 0 until dirArr.length()) {
@@ -106,6 +73,8 @@ object RugbyJsonParser {
                 teamsMap[profile.key.ifBlank { profile.name.lowercase() }] = profile
             }
         }
+
+        val urbaObj = root.optJSONObject("urba")
         val urbaClubs = urbaObj?.optJSONArray("clubs") ?: JSONArray()
         for (i in 0 until urbaClubs.length()) {
             val uc = urbaClubs.optJSONObject(i) ?: continue
@@ -124,9 +93,96 @@ object RugbyJsonParser {
                     groups = listOf("urba"),
                     leagues = listOf("URBA ${uc.optString("division", "")}".trim()),
                     division = uc.optString("division", ""),
-                    roster = emptyList()
+                    roster = emptyList(),
+                    homeKit = parseTeamKit(uc.optJSONObject("homeKit")),
+                    awayKit = parseTeamKit(uc.optJSONObject("awayKit"))
                 )
             }
+        }
+
+        // Enriquecer estadísticas históricas reales de cada equipo a partir de partidos cerrados + historial
+        val teamStats = mutableMapOf<String, IntArray>() // [played, wins, draws, losses]
+        fun recordResult(teamName: String, ptsFor: Int, ptsAgainst: Int) {
+            val k = CrossVerifyMatchesUseCase.normalizeTeam(teamName)
+            if (k.isBlank()) return
+            val arr = teamStats.getOrPut(k) { IntArray(4) }
+            arr[0] += 1
+            when {
+                ptsFor > ptsAgainst -> arr[1] += 1
+                ptsFor == ptsAgainst -> arr[2] += 1
+                else -> arr[3] += 1
+            }
+        }
+        val countedMatchKeys = mutableSetOf<String>()
+        for (m in matches) {
+            if (m.status == MatchStatus.FINISHED && m.homeScore != null && m.awayScore != null) {
+                countedMatchKeys.add(CrossVerifyMatchesUseCase.matchSignature(m))
+                recordResult(m.homeName, m.homeScore, m.awayScore)
+                recordResult(m.awayName, m.awayScore, m.homeScore)
+            }
+        }
+        val histArr = root.optJSONArray("history") ?: JSONArray()
+        for (i in 0 until histArr.length()) {
+            val h = histArr.optJSONObject(i) ?: continue
+            if (h.isNull("homeScore") || h.isNull("awayScore")) continue
+            val hn = h.optString("homeTeam")
+            val an = h.optString("awayTeam")
+            val day = h.optString("dateArg").take(10)
+            val sig = "${CrossVerifyMatchesUseCase.normalizeTeam(hn)}_vs_${CrossVerifyMatchesUseCase.normalizeTeam(an)}_$day"
+            if (sig !in countedMatchKeys) {
+                countedMatchKeys.add(sig)
+                val hs = h.optInt("homeScore")
+                val as_ = h.optInt("awayScore")
+                recordResult(hn, hs, as_)
+                recordResult(an, as_, hs)
+            }
+        }
+
+        val enrichedTeams = teamsMap.values.map { team ->
+            val st = teamStats[CrossVerifyMatchesUseCase.normalizeTeam(team.name)]
+            if (st != null && st[0] > 0) {
+                team.copy(
+                    historicalPlayed = st[0],
+                    historicalWins = st[1],
+                    historicalDraws = st[2],
+                    historicalLosses = st[3]
+                )
+            } else {
+                team
+            }
+        }
+
+        val teamByNorm = enrichedTeams.associateBy { CrossVerifyMatchesUseCase.normalizeTeam(it.name) }
+
+        val standingsList = mutableListOf<TournamentStandings>()
+        val urbaChamps = urbaObj?.optJSONArray("championships") ?: JSONArray()
+        for (i in 0 until urbaChamps.length()) {
+            val ch = urbaChamps.optJSONObject(i) ?: continue
+            val rows = parseStandingsRows(ch.optJSONArray("standings"), teamByNorm, defaultFlag = "https://flagcdn.com/w80/ar.png")
+            if (rows.isNotEmpty()) {
+                standingsList.add(
+                    TournamentStandings(
+                        id = "urba_${ch.optString("id")}",
+                        name = ch.optString("name"),
+                        shortName = ch.optString("short", ch.optString("name")),
+                        group = "urba",
+                        rows = rows
+                    )
+                )
+            }
+        }
+        val sraObj = root.optJSONObject("sra")
+        val sraRows = parseStandingsRows(sraObj?.optJSONArray("standings"), teamByNorm)
+        if (sraRows.isNotEmpty()) {
+            standingsList.add(
+                TournamentStandings(
+                    id = "sra",
+                    name = "Súper Rugby Américas",
+                    shortName = "SRA",
+                    group = "sra",
+                    rows = sraRows
+                )
+            )
         }
 
         val rankingsObj = root.optJSONObject("rankings")
@@ -146,28 +202,69 @@ object RugbyJsonParser {
                     source = n.optString("source"),
                     url = n.optString("url"),
                     imageUrl = n.optString("imageUrl"),
-                    category = n.optString("category", "General"),
-                    publishedLabel = n.optString("publishedArg", n.optString("published", "")),
+                    category = n.optString("topicLabel", n.optString("category", "General")).ifBlank { "General" },
+                    publishedLabel = n.optString("dateArg", n.optString("publishedArg", n.optString("published", ""))),
                     savedOffline = id in savedNewsIds
                 )
             )
         }
 
+        val matchesWithKits = attachTeamKitsToMatches(matches, enrichedTeams)
+        val nextXVWithKit = nextXV?.let { attachTeamKitsToMatches(listOf(it), enrichedTeams).firstOrNull() }
+        val next7sWithKit = next7s?.let { attachTeamKitsToMatches(listOf(it), enrichedTeams).firstOrNull() }
+
         return RugbyDashboard(
             generatedAtArg = generatedAtArg,
-            nextArgentinaXV = nextXV,
-            nextArgentina7s = next7s,
+            nextArgentinaXV = nextXVWithKit,
+            nextArgentina7s = next7sWithKit,
             coachXV = coachXV,
             coach7s = coach7s,
-            matches = matches,
+            matches = matchesWithKits,
             competitions = comps,
             standings = standingsList,
-            teams = teamsMap.values.toList(),
+            teams = enrichedTeams,
             rankingsMen = rankingsMen,
             rankingsWomen = rankingsWomen,
             news = newsList,
             sourcesHealth = emptyList(),
             isOfflineFallback = false
+        )
+    }
+
+    fun attachTeamKitsToMatches(
+        matches: List<RugbyMatch>,
+        teams: List<TeamProfile>
+    ): List<RugbyMatch> {
+        if (teams.isEmpty()) return matches
+        val byNorm = teams.associateBy { CrossVerifyMatchesUseCase.normalizeTeam(it.name) }
+        return matches.map { m ->
+            val hTeam = byNorm[CrossVerifyMatchesUseCase.normalizeTeam(m.homeName)]
+            val aTeam = byNorm[CrossVerifyMatchesUseCase.normalizeTeam(m.awayName)]
+            val resolved = ResolveMatchKitsUseCase.resolveForMatch(hTeam, aTeam)
+            m.copy(
+                homeCrestUrl = m.homeCrestUrl.ifBlank { hTeam?.crestUrl.orEmpty() },
+                homeFlagUrl = m.homeFlagUrl.ifBlank { hTeam?.flagUrl.orEmpty() },
+                awayCrestUrl = m.awayCrestUrl.ifBlank { aTeam?.crestUrl.orEmpty() },
+                awayFlagUrl = m.awayFlagUrl.ifBlank { aTeam?.flagUrl.orEmpty() },
+                homeKit = resolved.homeKit,
+                awayKit = resolved.awayKit,
+                homeActiveKitRole = resolved.homeRole,
+                awayActiveKitRole = resolved.awayRole
+            )
+        }
+    }
+
+    private fun parseTeamKit(obj: JSONObject?): TeamKit? {
+        if (obj == null) return null
+        val primary = obj.optString("primaryHex", "").trim()
+        if (!obj.optBoolean("verified", false) || primary.isBlank()) return null
+        return TeamKit(
+            verified = true,
+            primaryHex = primary,
+            secondaryHex = obj.optString("secondaryHex", "#FFFFFF").ifBlank { "#FFFFFF" },
+            shortsHex = obj.optString("shortsHex", primary).ifBlank { primary },
+            pattern = obj.optString("pattern", "solid").ifBlank { "solid" },
+            label = obj.optString("label", "")
         )
     }
 
@@ -196,10 +293,10 @@ object RugbyJsonParser {
             events.add(
                 MatchEvent(
                     id = "sc_$i",
-                    minute = ev.optInt("minute", 0),
+                    minute = ev.optString("minute", "0").replace("'", "").trim().toIntOrNull() ?: ev.optInt("minute", 0),
                     period = ev.optString("period", ""),
                     type = evType,
-                    teamSide = ev.optString("side", "home"),
+                    teamSide = ev.optString("team", ev.optString("side", "home")),
                     player = ev.optString("player", ""),
                     detail = ev.optString("label", evType.label)
                 )
@@ -208,14 +305,15 @@ object RugbyJsonParser {
         val cardsArr = m.optJSONArray("cards") ?: JSONArray()
         for (i in 0 until cardsArr.length()) {
             val c = cardsArr.optJSONObject(i) ?: continue
-            val isRed = c.optString("color").lowercase().contains("red") || c.optString("color").lowercase().contains("roj")
+            val rawCol = c.optString("type", c.optString("color", "")).lowercase()
+            val isRed = rawCol.contains("red") || rawCol.contains("roj")
             events.add(
                 MatchEvent(
                     id = "cd_$i",
-                    minute = c.optInt("minute", 0),
+                    minute = c.optString("minute", "0").replace("'", "").trim().toIntOrNull() ?: c.optInt("minute", 0),
                     period = "",
                     type = if (isRed) MatchEventType.RED_CARD else MatchEventType.YELLOW_CARD,
-                    teamSide = c.optString("side", "home"),
+                    teamSide = c.optString("team", c.optString("side", "home")),
                     player = c.optString("player", ""),
                     detail = if (isRed) "Tarjeta Roja" else "Tarjeta Amarilla"
                 )
@@ -234,59 +332,68 @@ object RugbyJsonParser {
             leagueId = m.optString("leagueId"),
             leagueName = m.optString("leagueName"),
             leagueShort = m.optString("leagueShort", m.optString("leagueName")),
-            phase = m.optString("phase"),
-            group = m.optString("group", "clubs"),
-            category = m.optString("category"),
+            phase = m.optString("phase", ""),
+            group = m.optString("group", ""),
+            category = m.optString("category", ""),
             status = status,
-            minuteDisplay = m.optString("clock", ""),
-            periodDisplay = m.optString("statusText", status.label),
+            minuteDisplay = m.optString("statusText", ""),
+            periodDisplay = when (status) {
+                MatchStatus.LIVE -> m.optString("statusText", "EN VIVO")
+                MatchStatus.FINISHED -> "Final"
+                MatchStatus.SCHEDULED -> "Programado"
+            },
             dateArg = m.optString("dateArg", ""),
             dayArg = m.optString("dayArg", ""),
             timeArg = m.optString("timeArg", ""),
             timestampSec = m.optLong("ts", 0L),
             venueName = venue.optString("name", ""),
             venueCity = venue.optString("city", ""),
-            homeName = home.optString("name"),
-            homeAbbr = home.optString("abbr"),
-            homeCrestUrl = home.optString("crestUrl"),
-            homeFlagUrl = home.optString("flagUrl"),
-            homeCoach = home.optString("coach"),
+            homeName = home.optString("name", ""),
+            homeAbbr = home.optString("abbr", ""),
+            homeCrestUrl = home.optString("crestUrl", ""),
+            homeFlagUrl = home.optString("flagUrl", ""),
+            homeCoach = home.optString("coach", ""),
             homeRank = hRank,
             homeScore = hScore,
-            awayName = away.optString("name"),
-            awayAbbr = away.optString("abbr"),
-            awayCrestUrl = away.optString("crestUrl"),
-            awayFlagUrl = away.optString("flagUrl"),
-            awayCoach = away.optString("coach"),
+            awayName = away.optString("name", ""),
+            awayAbbr = away.optString("abbr", ""),
+            awayCrestUrl = away.optString("crestUrl", ""),
+            awayFlagUrl = away.optString("flagUrl", ""),
+            awayCoach = away.optString("coach", ""),
             awayRank = aRank,
             awayScore = aScore,
             isArgentina = m.optBoolean("isArgentina", false),
-            verificationStatus = VerificationStatus.PENDING_VERIFICATION,
-            verifiedSources = listOf(src, "github_snapshot"),
+            verificationStatus = VerificationStatus.LOCAL_CACHE,
+            verifiedSources = listOf(src),
             events = events.sortedBy { it.minute },
             liveStats = null
         )
     }
 
-    private fun parseStandingsRows(arr: JSONArray?): List<StandingRow> {
+    private fun parseStandingsRows(
+        arr: JSONArray?,
+        teamByNorm: Map<String, TeamProfile>,
+        defaultFlag: String = ""
+    ): List<StandingRow> {
         if (arr == null) return emptyList()
         val out = mutableListOf<StandingRow>()
         for (i in 0 until arr.length()) {
             val r = arr.optJSONObject(i) ?: continue
-            val pf = r.optInt("pf", 0)
-            val pc = r.optInt("pc", 0)
+            val tName = r.optString("team", r.optString("name"))
+            val matchedTeam = teamByNorm[CrossVerifyMatchesUseCase.normalizeTeam(tName)]
             out.add(
                 StandingRow(
                     pos = r.optInt("pos", i + 1),
-                    teamName = r.optString("name"),
-                    crestUrl = r.optString("crestUrl"),
-                    played = r.optInt("played", 0),
-                    won = r.optInt("won", 0),
-                    drawn = r.optInt("tied", r.optInt("drawn", 0)),
-                    lost = r.optInt("lost", 0),
-                    pf = pf,
-                    pc = pc,
-                    diff = r.optInt("diff", pf - pc),
+                    teamName = tName,
+                    crestUrl = r.optString("crestUrl").ifBlank { matchedTeam?.crestUrl.orEmpty() },
+                    flagUrl = r.optString("flagUrl").ifBlank { matchedTeam?.flagUrl.orEmpty() }.ifBlank { defaultFlag },
+                    played = r.optInt("played", r.optInt("pj", 0)),
+                    won = r.optInt("won", r.optInt("pg", 0)),
+                    drawn = r.optInt("drawn", r.optInt("pe", 0)),
+                    lost = r.optInt("lost", r.optInt("pp", 0)),
+                    pf = r.optInt("pf", 0),
+                    pc = r.optInt("pc", 0),
+                    diff = r.optInt("diff", 0),
                     bonus = r.optInt("bonus", 0),
                     pts = r.optInt("pts", 0)
                 )
@@ -308,18 +415,27 @@ object RugbyJsonParser {
         val rArr = t.optJSONArray("roster") ?: JSONArray()
         for (i in 0 until rArr.length()) {
             val p = rArr.optJSONObject(i) ?: continue
+            val rawHeight = if (p.isNull("height")) null else p.optString("height").trim().takeIf { it.isNotBlank() && it != "null" }
+            val rawWeight = if (p.isNull("weight")) null else p.optString("weight").trim().takeIf { it.isNotBlank() && it != "null" }
             roster.add(
                 PlayerProfile(
-                    jersey = p.optString("jersey", ""),
+                    jersey = p.optString("jersey", "-"),
                     name = p.optString("name", ""),
                     position = p.optString("position", ""),
                     posCode = p.optString("posCode", ""),
                     starter = p.optBoolean("starter", false),
                     captain = p.optBoolean("captain", false),
                     age = if (p.isNull("age")) null else p.optInt("age"),
-                    height = if (p.isNull("height")) null else p.optString("height"),
-                    weight = if (p.isNull("weight")) null else p.optString("weight"),
-                    caps = if (p.isNull("caps")) null else p.optInt("caps")
+                    height = rawHeight,
+                    weight = rawWeight,
+                    caps = if (p.isNull("caps")) null else p.optInt("caps"),
+                    photoUrl = if (p.isNull("photoUrl")) null else p.optString("photoUrl").takeIf { it.isNotBlank() },
+                    nationality = if (p.isNull("nationality")) null else p.optString("nationality").takeIf { it.isNotBlank() },
+                    nationalityFlagUrl = if (p.isNull("nationalityFlagUrl")) null else p.optString("nationalityFlagUrl").takeIf { it.isNotBlank() },
+                    tries = if (p.isNull("tries")) null else p.optInt("tries"),
+                    points = if (p.isNull("points")) null else p.optInt("points"),
+                    tackles = if (p.isNull("tackles")) null else p.optInt("tackles"),
+                    extraInfo = if (p.isNull("extraInfo")) null else p.optString("extraInfo").takeIf { it.isNotBlank() }
                 )
             )
         }
@@ -334,7 +450,9 @@ object RugbyJsonParser {
             groups = groups,
             leagues = leagues,
             division = t.optString("division", ""),
-            roster = roster
+            roster = roster,
+            homeKit = parseTeamKit(t.optJSONObject("homeKit")),
+            awayKit = parseTeamKit(t.optJSONObject("awayKit"))
         )
     }
 
@@ -359,7 +477,11 @@ object RugbyJsonParser {
         return out
     }
 
-    fun parseEspnScoreboard(jsonStr: String): List<RugbyMatch> {
+    fun parseEspnScoreboard(
+        jsonStr: String,
+        leagueIdHint: String = "",
+        leagueNameHint: String = ""
+    ): List<RugbyMatch> {
         val root = JSONObject(jsonStr)
         val out = mutableListOf<RugbyMatch>()
         val events = root.optJSONArray("events") ?: JSONArray()
@@ -392,6 +514,7 @@ object RugbyJsonParser {
             val periodLabel = when {
                 status == MatchStatus.LIVE && periodNum == 1 -> "1er Tiempo"
                 status == MatchStatus.LIVE && periodNum >= 2 -> "2do Tiempo"
+                status == MatchStatus.FINISHED -> "Final"
                 else -> typeObj.optString("shortDetail", status.label)
             }
             val isoDate = ev.optString("date", "")
@@ -399,7 +522,8 @@ object RugbyJsonParser {
             val ts = zdt?.toEpochSecond() ?: 0L
             val hScore = homeObj.optString("score", "").toIntOrNull()
             val aScore = awayObj.optString("score", "").toIntOrNull()
-            val leagueName = root.optJSONArray("leagues")?.optJSONObject(0)?.optString("name", "Rugby Union") ?: "Rugby Union"
+            val leagueName = root.optJSONArray("leagues")?.optJSONObject(0)?.optString("name", leagueNameHint.ifBlank { "Rugby Union" })
+                ?: leagueNameHint.ifBlank { "Rugby Union" }
             val leagueShort = root.optJSONArray("leagues")?.optJSONObject(0)?.optString("abbreviation", leagueName) ?: leagueName
             val hName = homeTeam.optString("displayName", homeTeam.optString("name"))
             val aName = awayTeam.optString("displayName", awayTeam.optString("name"))
@@ -408,9 +532,11 @@ object RugbyJsonParser {
 
             out.add(
                 RugbyMatch(
-                    id = "espn:${ev.optString("id")}",
-                    source = "espn_live",
-                    leagueId = root.optJSONArray("leagues")?.optJSONObject(0)?.optString("id", "espn") ?: "espn",
+                    id = "espn_${ev.optString("id")}",
+                    source = "sec_live",
+                    leagueId = leagueIdHint.ifBlank {
+                        root.optJSONArray("leagues")?.optJSONObject(0)?.optString("id", "rugby") ?: "rugby"
+                    },
                     leagueName = leagueName,
                     leagueShort = leagueShort,
                     phase = "",
@@ -441,7 +567,7 @@ object RugbyJsonParser {
                     awayScore = if (status == MatchStatus.SCHEDULED) null else aScore,
                     isArgentina = isArg,
                     verificationStatus = VerificationStatus.PENDING_VERIFICATION,
-                    verifiedSources = listOf("espn_live"),
+                    verifiedSources = listOf("sec_live"),
                     events = emptyList(),
                     liveStats = null
                 )
@@ -449,6 +575,8 @@ object RugbyJsonParser {
         }
         return out
     }
+
+    fun parseWorldRugbyMatches(jsonStr: String): List<RugbyMatch> = parseWorldRugbyLive(jsonStr)
 
     fun parseWorldRugbyLive(jsonStr: String): List<RugbyMatch> {
         val root = JSONObject(jsonStr)
@@ -478,12 +606,12 @@ object RugbyJsonParser {
             val aName = away.optString("name")
             val isArg = hName.contains("Argentina", true) || aName.contains("Argentina", true)
             val venue = m.optJSONObject("venue")
-            val compName = m.optJSONArray("events")?.optJSONObject(0)?.optString("label", "World Rugby") ?: "World Rugby"
+            val compName = m.optJSONArray("events")?.optJSONObject(0)?.optString("label", "Rugby Internacional") ?: "Rugby Internacional"
 
             out.add(
                 RugbyMatch(
-                    id = "wr:${m.optString("matchId")}",
-                    source = "world_rugby",
+                    id = "wr_${m.optString("matchId")}",
+                    source = "official_live",
                     leagueId = "wr",
                     leagueName = compName,
                     leagueShort = compName.take(18),
@@ -492,7 +620,7 @@ object RugbyJsonParser {
                     category = "Selecciones",
                     status = status,
                     minuteDisplay = clockDisp,
-                    periodDisplay = status.label,
+                    periodDisplay = if (status == MatchStatus.FINISHED) "Final" else status.label,
                     dateArg = zdt?.let { argFmt.format(it) } ?: "",
                     dayArg = zdt?.let { dayFmt.format(it) } ?: "",
                     timeArg = zdt?.let { timeFmt.format(it) } ?: "",
@@ -515,7 +643,7 @@ object RugbyJsonParser {
                     awayScore = aScore,
                     isArgentina = isArg,
                     verificationStatus = VerificationStatus.PENDING_VERIFICATION,
-                    verifiedSources = listOf("world_rugby"),
+                    verifiedSources = listOf("official_live"),
                     events = emptyList(),
                     liveStats = null
                 )
@@ -524,9 +652,22 @@ object RugbyJsonParser {
         return out
     }
 
-    fun parseEspnMatchDetail(jsonStr: String, homeIdHint: String = ""): Pair<List<MatchEvent>, LiveMatchStats?> {
+    fun parseEspnSummaryDetails(
+        jsonStr: String,
+        homeNameHint: String = "",
+        awayNameHint: String = ""
+    ): Pair<List<MatchEvent>, LiveMatchStats?> {
         val root = JSONObject(jsonStr)
         val events = mutableListOf<MatchEvent>()
+        val headerComps = root.optJSONObject("header")?.optJSONArray("competitions")?.optJSONObject(0)?.optJSONArray("competitors")
+        var homeId = ""
+        if (headerComps != null) {
+            for (i in 0 until headerComps.length()) {
+                val c = headerComps.optJSONObject(i) ?: continue
+                if (c.optString("homeAway") == "home") homeId = c.optString("id")
+            }
+        }
+
         val scoringPlays = root.optJSONArray("scoringPlays") ?: JSONArray()
         for (i in 0 until scoringPlays.length()) {
             val sp = scoringPlays.optJSONObject(i) ?: continue
@@ -537,18 +678,27 @@ object RugbyJsonParser {
                 "conv" in typeText -> MatchEventType.CONVERSION
                 "pen" in typeText -> MatchEventType.PENALTY
                 "drop" in typeText -> MatchEventType.DROP_GOAL
+                "yellow" in typeText -> MatchEventType.YELLOW_CARD
+                "red" in typeText -> MatchEventType.RED_CARD
+                "sub" in typeText -> MatchEventType.SUBSTITUTION
                 else -> MatchEventType.TRY
             }
             val min = sp.optJSONObject("clock")?.optString("displayValue", "")
                 ?.replace("'", "")?.substringBefore(":")?.toIntOrNull() ?: 0
-            val teamId = sp.optJSONObject("team")?.optString("id", "").orEmpty()
+            val teamObj = sp.optJSONObject("team")
+            val teamId = teamObj?.optString("id", "").orEmpty()
+            val teamName = teamObj?.optString("displayName", "").orEmpty()
+            val isHome = (homeId.isNotBlank() && teamId == homeId) ||
+                (homeNameHint.isNotBlank() && teamName.equals(homeNameHint, true)) ||
+                (awayNameHint.isNotBlank() && !teamName.equals(awayNameHint, true) && teamName.isBlank())
+
             events.add(
                 MatchEvent(
                     id = "sp_${sp.optString("id", i.toString())}",
                     minute = min,
                     period = sp.optJSONObject("period")?.optString("number", "")?.let { "${it}T" } ?: "",
                     type = evType,
-                    teamSide = if (teamId == homeIdHint || homeIdHint.isBlank()) "home" else "away",
+                    teamSide = if (isHome) "home" else "away",
                     player = text.substringBefore("-").trim(),
                     detail = text
                 )
@@ -589,4 +739,7 @@ object RugbyJsonParser {
         }
         return events.sortedBy { it.minute } to stats
     }
+
+    fun parseEspnMatchDetail(jsonStr: String, homeIdHint: String = ""): Pair<List<MatchEvent>, LiveMatchStats?> =
+        parseEspnSummaryDetails(jsonStr, homeIdHint, "")
 }

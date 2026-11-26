@@ -1,34 +1,31 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
-    <radialGradient id="bg" cx="50%" cy="45%" r="65%">
-      <stop offset="0%" stop-color="#0d261d"/>
-      <stop offset="100%" stop-color="#040806"/>
-    </radialGradient>
-    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#f7dca0"/>
-      <stop offset="50%" stop-color="#d4a64a"/>
-      <stop offset="100%" stop-color="#966c21"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0B0F14"/>
+      <stop offset="100%" stop-color="#111923"/>
     </linearGradient>
-    <linearGradient id="ball" x1="0.2" y1="0" x2="0.8" y2="1">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="70%" stop-color="#e5e9e7"/>
-      <stop offset="100%" stop-color="#b8c4be"/>
+    <linearGradient id="emerald" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#00C853"/>
+      <stop offset="100%" stop-color="#00695C"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFE57F"/>
+      <stop offset="50%" stop-color="#FFD700"/>
+      <stop offset="100%" stop-color="#B8860B"/>
     </linearGradient>
   </defs>
   <rect width="512" height="512" rx="112" fill="url(#bg)"/>
-  <rect x="134" y="88" width="16" height="292" rx="8" fill="url(#gold)"/>
-  <rect x="362" y="88" width="16" height="292" rx="8" fill="url(#gold)"/>
-  <rect x="134" y="252" width="244" height="16" rx="6" fill="url(#gold)"/>
-  <rect x="122" y="318" width="40" height="72" rx="8" fill="#10b981" stroke="url(#gold)" stroke-width="3"/>
-  <rect x="350" y="318" width="40" height="72" rx="8" fill="#10b981" stroke="url(#gold)" stroke-width="3"/>
-  <ellipse cx="256" cy="264" rx="76" ry="120" fill="url(#ball)" stroke="url(#gold)" stroke-width="6"/>
-  <path d="M256 146 V382" stroke="#13201b" stroke-width="2.5" opacity="0.65"/>
-  <path d="M222 178 Q256 264 222 350 M290 178 Q256 264 290 350" fill="none" stroke="url(#gold)" stroke-width="4" stroke-linecap="round"/>
-  <g stroke="#d4a64a" stroke-width="5" stroke-linecap="round">
-    <line x1="238" y1="222" x2="274" y2="222"/>
-    <line x1="236" y1="242" x2="276" y2="242"/>
-    <line x1="236" y1="262" x2="276" y2="262"/>
-    <line x1="236" y1="282" x2="276" y2="282"/>
-    <line x1="238" y1="302" x2="274" y2="302"/>
+  <path d="M256 72 L396 128 V248 C396 344 332 414 256 446 C180 414 116 344 116 248 V128 Z"
+        fill="#10211C" stroke="url(#gold)" stroke-width="14"/>
+  <g transform="translate(256 258) rotate(-32)">
+    <ellipse cx="0" cy="0" rx="116" ry="74" fill="url(#emerald)" stroke="#F5F5F5" stroke-width="6"/>
+    <path d="M-92 -28 Q0 -62 92 -28" fill="none" stroke="#F5F5F5" stroke-width="5" stroke-linecap="round"/>
+    <path d="M-92 28 Q0 62 92 28" fill="none" stroke="#F5F5F5" stroke-width="4" stroke-opacity="0.8"/>
+    <line x1="-26" y1="-10" x2="26" y2="-10" stroke="url(#gold)" stroke-width="6" stroke-linecap="round"/>
+    <line x1="-18" y1="-18" x2="-18" y2="-2" stroke="url(#gold)" stroke-width="5" stroke-linecap="round"/>
+    <line x1="0" y1="-18" x2="0" y2="-2" stroke="url(#gold)" stroke-width="5" stroke-linecap="round"/>
+    <line x1="18" y1="-18" x2="18" y2="-2" stroke="url(#gold)" stroke-width="5" stroke-linecap="round"/>
   </g>
+  <polyline points="148,262 214,262 232,226 254,296 276,240 294,262 364,262"
+            fill="none" stroke="#00E5FF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

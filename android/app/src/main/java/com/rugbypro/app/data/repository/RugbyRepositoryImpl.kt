@@ -60,11 +60,10 @@ class RugbyRepositoryImpl(
         val (payload, _) = readLocalPayload()
         val savedIds = dao.getAllSavedNews().map { it.id }.toSet()
         val parsed = RugbyJsonParser.parseEngineSnapshot(payload, savedIds)
-        val health = dao.getAllSourceHealth().map { it.toDomain() }
         val verifiedMatches = CrossVerifyMatchesUseCase.execute(parsed.matches, emptyList(), fromLocalCacheOnly = true)
         parsed.copy(
-            matches = verifiedMatches,
-            sourcesHealth = health,
+            matches = RugbyJsonParser.attachTeamKitsToMatches(verifiedMatches, parsed.teams),
+            sourcesHealth = emptyList(),
             isOfflineFallback = true
         )
     }
@@ -104,7 +103,7 @@ class RugbyRepositoryImpl(
         }
 
         val baseDash = RugbyJsonParser.parseEngineSnapshot(finalPayload, savedIds)
-        val peerMatches = result.worldRugbyMatches + result.espnLiveMatches
+        val peerMatches = result.worldRugbyMatches + result.secondaryLiveMatches
         val anyRemoteHealthy = result.healthItems.any { it.isHealthy }
         val mergedMatches = CrossVerifyMatchesUseCase.execute(
             primary = baseDash.matches,
@@ -117,9 +116,9 @@ class RugbyRepositoryImpl(
         val extraSaved = allSaved.filter { it.id !in liveIds }
 
         baseDash.copy(
-            matches = mergedMatches,
+            matches = RugbyJsonParser.attachTeamKitsToMatches(mergedMatches, baseDash.teams),
             news = baseDash.news + extraSaved,
-            sourcesHealth = result.healthItems,
+            sourcesHealth = emptyList(),
             isOfflineFallback = !anyRemoteHealthy
         )
     }

@@ -3,8 +3,8 @@ package com.rugbypro.app.ui.screens
 import android.content.res.Configuration
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -32,9 +32,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Article
-import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.CalendarMonth
-import androidx.compose.material.icons.outlined.CloudSync
+import androidx.compose.material.icons.outlined.CompareArrows
 import androidx.compose.material.icons.outlined.EmojiEvents
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.Home
@@ -92,6 +91,7 @@ import com.rugbypro.app.ui.RugbyViewModel
 import com.rugbypro.app.ui.components.GlassCard
 import com.rugbypro.app.ui.components.MatchScoreCard
 import com.rugbypro.app.ui.components.PulsingLiveIndicator
+import com.rugbypro.app.ui.components.SectionBackdropBanner
 import com.rugbypro.app.ui.theme.ElectricCyan
 import com.rugbypro.app.ui.theme.MetallicGold
 import com.rugbypro.app.ui.theme.PitchDarkBg
@@ -106,10 +106,9 @@ private fun AppSection.icon(): ImageVector = when (this) {
     AppSection.FIXTURE -> Icons.Outlined.CalendarMonth
     AppSection.TABLAS -> Icons.Outlined.EmojiEvents
     AppSection.EQUIPOS -> Icons.Outlined.Groups
-    AppSection.ESTADISTICAS -> Icons.Outlined.BarChart
+    AppSection.COMPARACION -> Icons.Outlined.CompareArrows
     AppSection.NOTICIAS -> Icons.Outlined.Article
     AppSection.CONFIGURACION -> Icons.Outlined.Settings
-    AppSection.FUENTES -> Icons.Outlined.CloudSync
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -125,7 +124,7 @@ fun RugbyProRoot(
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
-        delay(1300)
+        delay(1350)
         showSplash = false
     }
 
@@ -167,7 +166,7 @@ fun RugbyProRoot(
                                     Image(
                                         painter = painterResource(id = R.drawable.logo_rugby_master),
                                         contentDescription = "Logo Rugby Pro",
-                                        modifier = Modifier.size(32.dp)
+                                        modifier = Modifier.size(34.dp)
                                     )
                                     Spacer(Modifier.width(Spacing.sm))
                                     Column {
@@ -177,8 +176,8 @@ fun RugbyProRoot(
                                             fontWeight = FontWeight.Bold
                                         )
                                         Text(
-                                            text = if (state.liveMatches.isNotEmpty()) "${state.liveMatches.size} en vivo" else "Rugby Pro",
-                                            style = MaterialTheme.typography.labelMedium,
+                                            text = if (state.liveMatches.isNotEmpty()) "${state.liveMatches.size} partidos en vivo" else "Rugby Pro",
+                                            style = MaterialTheme.typography.labelSmall,
                                             color = if (state.liveMatches.isNotEmpty()) PitchGreen else MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
@@ -186,20 +185,10 @@ fun RugbyProRoot(
                             },
                             actions = {
                                 IconButton(
-                                    onClick = { viewModel.selectSection(AppSection.FUENTES) },
+                                    onClick = { viewModel.refreshNow(forceSnapshot = true) },
                                     modifier = Modifier.size(48.dp)
                                 ) {
-                                    Icon(
-                                        Icons.Outlined.CloudSync,
-                                        contentDescription = "Estado de fuentes",
-                                        tint = if (state.dashboard?.isOfflineFallback == true) MetallicGold else PitchGreen
-                                    )
-                                }
-                                IconButton(
-                                    onClick = { viewModel.refreshNow(true) },
-                                    modifier = Modifier.size(48.dp)
-                                ) {
-                                    Icon(Icons.Outlined.Refresh, contentDescription = "Actualizar datos")
+                                    Icon(Icons.Outlined.Refresh, contentDescription = "Actualizar resultados")
                                 }
                             }
                         )
@@ -208,25 +197,24 @@ fun RugbyProRoot(
                     Column(modifier = Modifier.fillMaxSize().padding(padding)) {
                         if (state.isSyncing) {
                             LinearProgressIndicator(
-                                modifier = Modifier.fillMaxWidth(),
-                                color = MaterialTheme.colorScheme.primary
+                                color = PitchGreen,
+                                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.fillMaxWidth().height(2.dp)
                             )
                         }
                         AnimatedContent(
                             targetState = state.currentSection,
-                            label = "sectionTransition",
-                            modifier = Modifier.weight(1f)
+                            label = "sectionTransition"
                         ) { section ->
                             when (section) {
-                                AppSection.INICIO -> InicioScreen(state, viewModel)
+                                AppSection.INICIO -> HomeScreen(state, viewModel)
                                 AppSection.VIVO -> LiveMatchesScreen(state, viewModel)
                                 AppSection.FIXTURE -> FixtureResultsScreen(state, viewModel)
                                 AppSection.TABLAS -> StandingsScreen(state, viewModel)
                                 AppSection.EQUIPOS -> TeamsSquadsScreen(state, viewModel)
-                                AppSection.ESTADISTICAS -> StatsComparisonScreen(state, viewModel)
+                                AppSection.COMPARACION -> ComparisonScreen(state, viewModel)
                                 AppSection.NOTICIAS -> NewsScreen(state, viewModel)
                                 AppSection.CONFIGURACION -> SettingsScreen(state, viewModel, onRequestNotificationPermission)
-                                AppSection.FUENTES -> SourcesStatusScreen(state, viewModel)
                             }
                         }
                     }
@@ -237,9 +225,8 @@ fun RugbyProRoot(
                 PermanentNavigationDrawer(
                     drawerContent = {
                         PermanentDrawerSheet(
-                            modifier = Modifier.width(268.dp),
                             drawerContainerColor = MaterialTheme.colorScheme.surface,
-                            drawerContentColor = MaterialTheme.colorScheme.onSurface
+                            modifier = Modifier.width(276.dp)
                         ) {
                             DrawerMenuContent(
                                 current = state.currentSection,
@@ -255,15 +242,14 @@ fun RugbyProRoot(
                     drawerState = drawerState,
                     drawerContent = {
                         ModalDrawerSheet(
-                            modifier = Modifier.width(292.dp),
                             drawerContainerColor = MaterialTheme.colorScheme.surface,
-                            drawerContentColor = MaterialTheme.colorScheme.onSurface
+                            modifier = Modifier.width(292.dp)
                         ) {
                             DrawerMenuContent(
                                 current = state.currentSection,
                                 liveCount = state.liveMatches.size,
-                                onSelect = { sec ->
-                                    viewModel.selectSection(sec)
+                                onSelect = {
+                                    viewModel.selectSection(it)
                                     scope.launch { drawerState.close() }
                                 }
                             )
@@ -278,6 +264,21 @@ fun RugbyProRoot(
             MatchDetailDialog(
                 match = match,
                 onDismiss = { viewModel.openMatchDetail(null) }
+            )
+        }
+
+        state.selectedTeam?.let { team ->
+            TeamDetailDialog(
+                team = team,
+                onDismiss = { viewModel.openTeamDetail(null) },
+                onSelectPlayer = { p -> viewModel.openPlayerFromTeam(team, p) }
+            )
+        }
+
+        state.selectedPlayer?.let { entry ->
+            PlayerDetailDialog(
+                entry = entry,
+                onDismiss = { viewModel.openPlayerDetail(null) }
             )
         }
 
@@ -320,7 +321,7 @@ private fun DrawerMenuContent(
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    text = "Centro en vivo & Datos",
+                    text = "Edición Internacional",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -338,12 +339,11 @@ private fun DrawerMenuContent(
         )
         val exploreSections = listOf(
             AppSection.EQUIPOS,
-            AppSection.ESTADISTICAS,
+            AppSection.COMPARACION,
             AppSection.NOTICIAS
         )
         val systemSections = listOf(
-            AppSection.CONFIGURACION,
-            AppSection.FUENTES
+            AppSection.CONFIGURACION
         )
 
         val itemColors = NavigationDrawerItemDefaults.colors(
@@ -412,23 +412,20 @@ private fun DrawerMenuContent(
 @Composable
 private fun CinematicSplashOverlay() {
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-    var started by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { started = true }
-    val scale by animateFloatAsState(
-        targetValue = if (started) 1f else 0.94f,
-        animationSpec = tween(900, easing = FastOutSlowInEasing),
-        label = "splashScale"
-    )
-    val alpha by animateFloatAsState(
-        targetValue = if (started) 1f else 0.35f,
-        animationSpec = tween(750),
-        label = "splashAlpha"
-    )
+    val scale = remember { Animatable(0.84f) }
+    val alpha = remember { Animatable(0f) }
+
+    LaunchedEffect(Unit) {
+        launch { alpha.animateTo(1f, animationSpec = tween(550)) }
+        launch { scale.animateTo(1f, animationSpec = tween(720, easing = FastOutSlowInEasing)) }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(PitchDarkBg)
-            .semantics { contentDescription = "Pantalla de bienvenida Rugby Pro" }
+            .semantics { contentDescription = "Pantalla de bienvenida Rugby Pro" },
+        contentAlignment = Alignment.Center
     ) {
         Image(
             painter = painterResource(
@@ -436,51 +433,81 @@ private fun CinematicSplashOverlay() {
             ),
             contentDescription = null,
             contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize().scale(scale).alpha(alpha)
+            modifier = Modifier.fillMaxSize().alpha(0.88f)
         )
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
-                        listOf(Color.Transparent, Color.Transparent, PitchDarkBg.copy(alpha = 0.86f))
+                        listOf(
+                            PitchDarkBg.copy(alpha = 0.58f),
+                            PitchDarkBg.copy(alpha = 0.72f),
+                            PitchDarkBg.copy(alpha = 0.96f)
+                        )
                     )
                 )
         )
         Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 56.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.scale(scale.value).alpha(alpha.value).padding(Spacing.xl)
         ) {
+            Image(
+                painter = painterResource(id = R.drawable.logo_rugby_master),
+                contentDescription = "Rugby Pro Logo",
+                modifier = Modifier.size(164.dp)
+            )
+            Spacer(Modifier.height(Spacing.md))
             Text(
                 text = "RUGBY PRO",
-                style = MaterialTheme.typography.headlineMedium,
-                color = Color.White,
-                fontWeight = FontWeight.Bold
+                style = MaterialTheme.typography.displaySmall,
+                color = Color(0xFFF5F5F5)
             )
+            Spacer(Modifier.height(6.dp))
             Text(
-                text = "PASIÓN EN VIVO · DATOS VERIFICADOS",
+                text = "RUGBY DE ÉLITE · EN VIVO",
                 style = MaterialTheme.typography.labelMedium,
-                color = ElectricCyan
+                color = MetallicGold
             )
         }
     }
 }
 
 @Composable
-fun InicioScreen(
+fun HomeScreen(
     state: RugbyUiState,
     viewModel: RugbyViewModel
 ) {
     val dash = state.dashboard
+    val live = state.liveMatches
+    val todayUpcoming = state.upcomingTodayMatches
+    val pumasXV = dash?.nextArgentinaXV
+    val pumas7s = dash?.nextArgentina7s
+    val topNews = dash?.news?.take(4).orEmpty()
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(Spacing.md),
         verticalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
         item {
-            GlassCard(highlightAccent = true) {
+            SectionBackdropBanner(
+                backgroundRes = R.drawable.bg_rugby_action,
+                eyebrow = "Centro Internacional",
+                title = "Rugby Pro",
+                subtitle = if (dash != null) {
+                    "Los Pumas XV (DT ${dash.coachXV}) · Seven (DT ${dash.coach7s})"
+                } else {
+                    "Cargando temporada..."
+                },
+                trailing = {
+                    if (live.isNotEmpty()) PulsingLiveIndicator("${live.size} EN VIVO")
+                }
+            )
+        }
+
+        item {
+            GlassCard(highlightAccent = live.isNotEmpty()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -488,125 +515,137 @@ fun InicioScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Centro Internacional & URBA",
-                            style = MaterialTheme.typography.titleLarge,
+                            text = if (live.isNotEmpty()) "${live.size} partidos jugándose ahora" else "Jornada de hoy",
+                            style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Actualizado: ${dash?.generatedAtArg ?: "Cargando..."}",
+                            text = if (todayUpcoming.isNotEmpty()) {
+                                "${todayUpcoming.size} partidos programados para hoy"
+                            } else {
+                                "Seguimiento automático cada ${state.config.liveRefreshSec} s"
+                            },
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    if (state.liveMatches.isNotEmpty()) {
-                        PulsingLiveIndicator("${state.liveMatches.size} EN VIVO")
-                    }
-                }
-                Spacer(Modifier.height(Spacing.sm))
-                if (dash != null) {
-                    Text(
-                        text = "Head Coaches · Los Pumas XV: ${dash.coachXV} · Seven 7s: ${dash.coach7s}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
-                    Spacer(Modifier.height(Spacing.sm))
-                    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                        OutlinedButton(
-                            onClick = { viewModel.selectSection(AppSection.VIVO) },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Ver En Vivo")
-                        }
-                        OutlinedButton(
-                            onClick = { viewModel.selectSection(AppSection.FIXTURE) },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Fixture (${dash.matches.size})")
-                        }
+                    OutlinedButton(onClick = { viewModel.selectSection(AppSection.VIVO) }) {
+                        Text("Ir a En Vivo")
                     }
                 }
             }
         }
 
-        if (state.liveMatches.isNotEmpty()) {
+        if (live.isNotEmpty()) {
             item {
-                Text(
-                    text = "Partidos en vivo ahora",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Text("En juego ahora", style = MaterialTheme.typography.titleLarge, color = PitchGreen)
             }
-            items(state.liveMatches.take(4), key = { it.id }) { m ->
+            items(live.take(3), key = { it.id }) { m ->
+                MatchScoreCard(match = m, onClick = { viewModel.openMatchDetail(m) })
+            }
+        } else if (todayUpcoming.isNotEmpty()) {
+            item {
+                Text("Próximos de hoy", style = MaterialTheme.typography.titleLarge, color = ElectricCyan)
+            }
+            items(todayUpcoming.take(3), key = { it.id }) { m ->
                 MatchScoreCard(match = m, onClick = { viewModel.openMatchDetail(m) })
             }
         }
 
-        dash?.nextArgentinaXV?.let { pumasXV ->
+        if (pumasXV != null) {
             item {
-                Text(
-                    text = "Próximo partido · Los Pumas XV",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.secondary
-                )
-            }
-            item {
+                Text("Los Pumas XV · Próxima cita", style = MaterialTheme.typography.titleMedium, color = MetallicGold)
+                Spacer(Modifier.height(Spacing.xs))
                 MatchScoreCard(match = pumasXV, onClick = { viewModel.openMatchDetail(pumasXV) })
             }
         }
 
-        dash?.nextArgentina7s?.let { pumas7s ->
+        if (pumas7s != null) {
             item {
-                Text(
-                    text = "Próximo partido · Los Pumas 7s",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.tertiary
-                )
-            }
-            item {
+                Text("Los Pumas 7s · Circuito Mundial", style = MaterialTheme.typography.titleMedium, color = ElectricCyan)
+                Spacer(Modifier.height(Spacing.xs))
                 MatchScoreCard(match = pumas7s, onClick = { viewModel.openMatchDetail(pumas7s) })
             }
         }
 
-        if (dash != null && dash.news.isNotEmpty()) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+            ) {
+                QuickNavCard("Fixture y
+resultados", Icons.Outlined.CalendarMonth, Modifier.weight(1f)) {
+                    viewModel.selectSection(AppSection.FIXTURE)
+                }
+                QuickNavCard("Tabla de
+posiciones", Icons.Outlined.EmojiEvents, Modifier.weight(1f)) {
+                    viewModel.selectSection(AppSection.TABLAS)
+                }
+                QuickNavCard("Comparar
+equipos", Icons.Outlined.CompareArrows, Modifier.weight(1f)) {
+                    viewModel.selectSection(AppSection.COMPARACION)
+                }
+            }
+        }
+
+        if (topNews.isNotEmpty()) {
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Últimas noticias",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
+                    Text("Actualidad del rugby", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onBackground)
                     OutlinedButton(onClick = { viewModel.selectSection(AppSection.NOTICIAS) }) {
                         Text("Ver todas")
                     }
                 }
             }
-            items(dash.news.take(3), key = { it.id }) { art ->
+            items(topNews, key = { it.id }) { art ->
                 GlassCard(onClick = { viewModel.selectSection(AppSection.NOTICIAS) }) {
                     Text(
-                        text = "${art.source} · ${art.category}",
+                        text = art.category.ifBlank { "Rugby" },
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary
+                        color = MetallicGold
                     )
-                    Spacer(Modifier.height(Spacing.xs))
-                    Text(
-                        text = art.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(art.title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                     if (art.publishedLabel.isNotBlank()) {
-                        Spacer(Modifier.height(Spacing.xs))
-                        Text(
-                            text = art.publishedLabel,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(art.publishedLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun QuickNavCard(
+    title: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        modifier = modifier.height(92.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(Spacing.sm),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(icon, contentDescription = title, tint = PitchGreen)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
         }
     }
 }

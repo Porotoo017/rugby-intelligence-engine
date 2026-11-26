@@ -6,10 +6,11 @@ enum class MatchStatus(val label: String) {
     FINISHED("FINALIZADO")
 }
 
-enum class VerificationStatus(val label: String) {
-    VERIFIED("VERIFICADO"),
-    PENDING_VERIFICATION("Pendiente de verificación"),
-    LOCAL_CACHE("Caché local")
+// Uso estrictamente interno de validación cruzada (nunca expuesto en UI)
+enum class VerificationStatus {
+    VERIFIED,
+    PENDING_VERIFICATION,
+    LOCAL_CACHE
 }
 
 enum class MatchEventType(val label: String) {
@@ -34,11 +35,25 @@ enum class AppSection(val label: String) {
     FIXTURE("Fixture y resultados"),
     TABLAS("Tabla de posiciones"),
     EQUIPOS("Equipos y planteles"),
-    ESTADISTICAS("Estadísticas"),
+    COMPARACION("Comparación"),
     NOTICIAS("Noticias"),
-    CONFIGURACION("Configuración"),
-    FUENTES("Estado de fuentes")
+    CONFIGURACION("Configuración")
 }
+
+enum class ActiveKitRole(val label: String) {
+    HOME("Titular"),
+    AWAY("Suplente"),
+    UNKNOWN("Información no disponible")
+}
+
+data class TeamKit(
+    val verified: Boolean = true,
+    val primaryHex: String,
+    val secondaryHex: String,
+    val shortsHex: String,
+    val pattern: String = "solid", // "solid" | "hoops" | "stripes" | "sash" | "split"
+    val label: String = ""
+)
 
 data class MatchEvent(
     val id: String,
@@ -106,7 +121,11 @@ data class RugbyMatch(
     val verificationStatus: VerificationStatus,
     val verifiedSources: List<String>,
     val events: List<MatchEvent>,
-    val liveStats: LiveMatchStats?
+    val liveStats: LiveMatchStats?,
+    val homeKit: TeamKit? = null,
+    val awayKit: TeamKit? = null,
+    val homeActiveKitRole: ActiveKitRole = ActiveKitRole.UNKNOWN,
+    val awayActiveKitRole: ActiveKitRole = ActiveKitRole.UNKNOWN
 )
 
 data class CompetitionItem(
@@ -122,6 +141,7 @@ data class StandingRow(
     val pos: Int,
     val teamName: String,
     val crestUrl: String,
+    val flagUrl: String = "",
     val played: Int,
     val won: Int,
     val drawn: Int,
@@ -151,7 +171,14 @@ data class PlayerProfile(
     val age: Int?,
     val height: String?,
     val weight: String?,
-    val caps: Int?
+    val caps: Int?,
+    val photoUrl: String? = null,
+    val nationality: String? = null,
+    val nationalityFlagUrl: String? = null,
+    val tries: Int? = null,
+    val points: Int? = null,
+    val tackles: Int? = null,
+    val extraInfo: String? = null
 )
 
 data class TeamProfile(
@@ -165,7 +192,21 @@ data class TeamProfile(
     val groups: List<String>,
     val leagues: List<String>,
     val division: String,
-    val roster: List<PlayerProfile>
+    val roster: List<PlayerProfile>,
+    val homeKit: TeamKit? = null,
+    val awayKit: TeamKit? = null,
+    val historicalPlayed: Int? = null,
+    val historicalWins: Int? = null,
+    val historicalDraws: Int? = null,
+    val historicalLosses: Int? = null
+)
+
+data class PlayerSearchEntry(
+    val teamKey: String,
+    val teamName: String,
+    val teamCrestUrl: String,
+    val teamFlagUrl: String,
+    val player: PlayerProfile
 )
 
 data class WorldRankingRow(
@@ -183,7 +224,7 @@ data class NewsArticle(
     val id: String,
     val title: String,
     val summary: String,
-    val source: String,
+    val source: String, // uso interno solamente; nunca mostrar en UI
     val url: String,
     val imageUrl: String,
     val category: String,
@@ -234,8 +275,10 @@ data class TeamComparisonResult(
 
 data class PlayerComparisonResult(
     val leftTeam: String,
+    val leftFlagUrl: String,
     val left: PlayerProfile,
     val rightTeam: String,
+    val rightFlagUrl: String,
     val right: PlayerProfile
 )
 

@@ -41,25 +41,25 @@ jobs:
 
       - name: Package APK and iOS/BrandKit Bundle
         run: |
-          cp android/app/build/outputs/apk/debug/app-debug.apk Rugby-Pro.apk
-          zip -r Rugby-Pro-iOS-BrandKit.zip brand-kit ios-assets
+          cp android/app/build/outputs/apk/debug/app-debug.apk Rugby-Pro-Max.apk
+          zip -r Rugby-Pro-Max-iOS-BrandKit.zip brand-kit ios-assets
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Rugby-Pro-Artifacts
+          name: Rugby-Pro-Max-Artifacts
           path: |
-            Rugby-Pro.apk
-            Rugby-Pro-iOS-BrandKit.zip
+            Rugby-Pro-Max.apk
+            Rugby-Pro-Max-iOS-BrandKit.zip
 
       - name: Publish APK & BrandKit to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v3.0-rugby-pro
-          name: Rugby Pro (Android APK + iOS BrandKit)
+          tag_name: v4.0-rugby-pro-max
+          name: Rugby Pro Max (Android APK + iOS BrandKit)
           body: |
-            - **Android APK (`Rugby-Pro.apk`)**: Kotlin + Jetpack Compose + Material 3, Navigation Drawer, Live Match Center, Room Offline Cache, WorkManager Push Alerts & Adaptive Icon.
-            - **iOS + Brand Kit (`Rugby-Pro-iOS-BrandKit.zip`)**: Transparent 1024x1024 master logo, dark vertical/horizontal splashes, monochrome gold/white/dark variants, and Xcode `AppIcon.appiconset` + `LaunchImage.imageset`.
+            - **Android APK (`Rugby-Pro-Max.apk`)**: Arquitectura MVVM (`ui/`, `data/`, `domain/`, `live/`), rediseño Material 3 de lujo, nuevo logo escudo+balón, partidos en vivo estricto, camisetas titular/suplente verificadas, fichas de jugadores y comparador con buscador multi-filtro.
+            - **iOS + Brand Kit (`Rugby-Pro-Max-iOS-BrandKit.zip`)**: Logo maestro transparente 1024×1024, splashes 1080×1920 / 1920×1080, monocromos dorado/blanco/oscuro y `AppIcon.appiconset` + `LaunchImage.imageset` para Xcode.
           files: |
-            Rugby-Pro.apk
-            Rugby-Pro-iOS-BrandKit.zip
+            Rugby-Pro-Max.apk
+            Rugby-Pro-Max-iOS-BrandKit.zip
