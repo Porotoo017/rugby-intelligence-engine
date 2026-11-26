@@ -7,7 +7,7 @@ import kotlinx.coroutines.delay
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import retrofit2.Retrofit
-import retrofit2.converter.scalars.ScalarsConverterFactory
+import okhttp3.ResponseBody
 import retrofit2.http.GET
 import retrofit2.http.Url
 import java.text.SimpleDateFormat
@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit
 
 interface DynamicRugbyApi {
     @GET
-    suspend fun fetchRaw(@Url url: String): String
+    suspend fun fetchRaw(@Url url: String): ResponseBody
 }
 
 data class CascadeSyncResult(
@@ -46,7 +46,6 @@ class RugbyCascadeClient {
         return Retrofit.Builder()
             .baseUrl("https://porotoo017.github.io/")
             .client(client)
-            .addConverterFactory(ScalarsConverterFactory.create())
             .build()
             .create(DynamicRugbyApi::class.java)
     }
@@ -60,7 +59,7 @@ class RugbyCascadeClient {
         for (url in urls) {
             var waitMs = 450L
             repeat(maxAttemptsPerUrl) {
-                val res = runCatching { api.fetchRaw(url) }.getOrNull()
+                val res = runCatching { api.fetchRaw(url).string() }.getOrNull()
                 if (!res.isNullOrBlank()) {
                     return res to (System.currentTimeMillis() - started)
                 }

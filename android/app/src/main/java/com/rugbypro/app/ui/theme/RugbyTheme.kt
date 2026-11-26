@@ -8,6 +8,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -47,6 +48,7 @@ object Spacing {
     val xl = 32.dp
 }
 
+@OptIn(ExperimentalTextApi::class)
 private fun makeOutfitFamily(): FontFamily {
     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         FontFamily(
@@ -60,6 +62,7 @@ private fun makeOutfitFamily(): FontFamily {
     }
 }
 
+@OptIn(ExperimentalTextApi::class)
 private fun makeInterFamily(): FontFamily {
     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         FontFamily(
