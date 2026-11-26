@@ -72,6 +72,7 @@ import com.rugbypro.app.domain.model.PlayerSearchEntry
 import com.rugbypro.app.domain.model.TeamKit
 import com.rugbypro.app.domain.model.TeamProfile
 import com.rugbypro.app.domain.model.ThemeMode
+import com.rugbypro.app.domain.usecase.RugbyDateUtils
 import com.rugbypro.app.live.RugbyNotificationManager
 import com.rugbypro.app.ui.RugbyUiState
 import com.rugbypro.app.ui.RugbyViewModel
@@ -590,8 +591,11 @@ fun ComparisonScreen(
                         }
                         Spacer(Modifier.height(Spacing.md))
                         CompareRow("Ranking Mundial", comp.left.worldRank?.let { "#$it" } ?: "N/D", comp.right.worldRank?.let { "#$it" } ?: "N/D")
+                        val leftPct = if (comp.leftPlayed > 0) RugbyDateUtils.formatPercent(comp.leftWins * 100.0 / comp.leftPlayed) else "N/D"
+                        val rightPct = if (comp.rightPlayed > 0) RugbyDateUtils.formatPercent(comp.rightWins * 100.0 / comp.rightPlayed) else "N/D"
                         CompareRow("Partidos cerrados", "${comp.leftPlayed}", "${comp.rightPlayed}")
                         CompareRow("Victorias", "${comp.leftWins}", "${comp.rightWins}")
+                        CompareRow("Efectividad", leftPct, rightPct)
                         CompareRow("Puntos a favor", "${comp.leftPointsFor}", "${comp.rightPointsFor}")
                         CompareRow("Puntos en contra", "${comp.leftPointsAgainst}", "${comp.rightPointsAgainst}")
                         CompareRow("Entrenador", comp.left.coach.ifBlank { "No disponible" }, comp.right.coach.ifBlank { "No disponible" })
@@ -1007,6 +1011,24 @@ fun SettingsScreen(
             }
         }
 
+        item {
+            GlassCard {
+                Text("Experiencia Inicial", style = MaterialTheme.typography.titleMedium, color = MetallicGold)
+                Spacer(Modifier.height(Spacing.xs))
+                Text(
+                    text = "Podés volver a ver las diapositivas de bienvenida y elegir tu equipo favorito.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(Spacing.sm))
+                OutlinedButton(
+                    onClick = { viewModel.replayOnboarding() },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                ) {
+                    Text("Ver guía de bienvenida")
+                }
+            }
+        }
         item {
             GlassCard {
                 Text("Privacidad y Seguridad", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)

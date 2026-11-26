@@ -269,9 +269,13 @@ object RugbyJsonParser {
     }
 
     private fun parseSnapshotMatch(m: JSONObject): RugbyMatch {
-        val status = when (m.optString("status").lowercase()) {
-            "live", "in" -> MatchStatus.LIVE
-            "finished", "post" -> MatchStatus.FINISHED
+        val rawSt = m.optString("status").lowercase()
+        val rawNote = m.optString("statusNote", m.optString("statusText", ""))
+        val status = when {
+            rawSt in listOf("live", "in") -> MatchStatus.LIVE
+            rawSt in listOf("finished", "post") -> MatchStatus.FINISHED
+            rawSt in listOf("postponed", "ppd", "delayed") || "posterg" in rawNote.lowercase() -> MatchStatus.POSTPONED
+            rawSt in listOf("cancelled", "canceled", "canc") || "cancel" in rawNote.lowercase() -> MatchStatus.CANCELLED
             else -> MatchStatus.SCHEDULED
         }
         val home = m.optJSONObject("home") ?: JSONObject()
@@ -340,6 +344,8 @@ object RugbyJsonParser {
             periodDisplay = when (status) {
                 MatchStatus.LIVE -> m.optString("statusText", "EN VIVO")
                 MatchStatus.FINISHED -> "Final"
+                MatchStatus.POSTPONED -> "Postergado"
+                MatchStatus.CANCELLED -> "Cancelado"
                 MatchStatus.SCHEDULED -> "Programado"
             },
             dateArg = m.optString("dateArg", ""),
@@ -366,7 +372,9 @@ object RugbyJsonParser {
             verificationStatus = VerificationStatus.LOCAL_CACHE,
             verifiedSources = listOf(src),
             events = events.sortedBy { it.minute },
-            liveStats = null
+            liveStats = null,
+            statusNote = rawNote.takeIf { it.isNotBlank() && (status == MatchStatus.POSTPONED || status == MatchStatus.CANCELLED) },
+            isExtraTime = m.optBoolean("extraTime", false) || rawNote.lowercase().let { "extra" in it || "prorroga" in it || "prórroga" in it }
         )
     }
 
@@ -504,18 +512,26 @@ object RugbyJsonParser {
             val statusObj = comp.optJSONObject("status") ?: ev.optJSONObject("status") ?: JSONObject()
             val typeObj = statusObj.optJSONObject("type") ?: JSONObject()
             val state = typeObj.optString("state", "pre").lowercase()
-            val status = when (state) {
-                "in" -> MatchStatus.LIVE
-                "post" -> MatchStatus.FINISHED
+            val typeName = typeObj.optString("name", "").lowercase()
+            val shortDetail = typeObj.optString("shortDetail", "")
+            val status = when {
+                "postpon" in typeName || "delay" in typeName -> MatchStatus.POSTPONED
+                "cancel" in typeName -> MatchStatus.CANCELLED
+                state == "in" -> MatchStatus.LIVE
+                state == "post" -> MatchStatus.FINISHED
                 else -> MatchStatus.SCHEDULED
             }
             val clock = statusObj.optString("displayClock", "")
             val periodNum = statusObj.optInt("period", 0)
+            val isEt = periodNum > 2 || shortDetail.lowercase().let { "et" in it || "extra" in it || "ot" in it }
             val periodLabel = when {
+                status == MatchStatus.LIVE && isEt -> "Tiempo extra"
                 status == MatchStatus.LIVE && periodNum == 1 -> "1er Tiempo"
-                status == MatchStatus.LIVE && periodNum >= 2 -> "2do Tiempo"
+                status == MatchStatus.LIVE && periodNum == 2 -> "2do Tiempo"
                 status == MatchStatus.FINISHED -> "Final"
-                else -> typeObj.optString("shortDetail", status.label)
+                status == MatchStatus.POSTPONED -> "Postergado"
+                status == MatchStatus.CANCELLED -> "Cancelado"
+                else -> shortDetail.ifBlank { status.label }
             }
             val isoDate = ev.optString("date", "")
             val zdt = runCatching { Instant.parse(isoDate).atZone(artZone) }.getOrNull()
@@ -569,7 +585,9 @@ object RugbyJsonParser {
                     verificationStatus = VerificationStatus.PENDING_VERIFICATION,
                     verifiedSources = listOf("sec_live"),
                     events = emptyList(),
-                    liveStats = null
+                    liveStats = null,
+                    statusNote = shortDetail.takeIf { it.isNotBlank() && (status == MatchStatus.POSTPONED || status == MatchStatus.CANCELLED) },
+                    isExtraTime = isEt
                 )
             )
         }
@@ -593,6 +611,8 @@ object RugbyJsonParser {
             val status = when (stRaw) {
                 "L" -> MatchStatus.LIVE
                 "C" -> MatchStatus.FINISHED
+                "P", "PPD" -> MatchStatus.POSTPONED
+                "X", "CAN" -> MatchStatus.CANCELLED
                 else -> MatchStatus.SCHEDULED
             }
             val timeObj = m.optJSONObject("time")

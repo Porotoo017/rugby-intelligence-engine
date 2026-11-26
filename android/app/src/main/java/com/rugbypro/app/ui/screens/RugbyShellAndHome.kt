@@ -21,7 +21,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -40,7 +43,15 @@ import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.SportsRugby
+import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -88,12 +99,15 @@ import com.rugbypro.app.R
 import com.rugbypro.app.domain.model.AppSection
 import com.rugbypro.app.ui.RugbyUiState
 import com.rugbypro.app.ui.RugbyViewModel
+import com.rugbypro.app.ui.components.DashboardSkeletonList
 import com.rugbypro.app.ui.components.GlassCard
 import com.rugbypro.app.ui.components.MatchScoreCard
 import com.rugbypro.app.ui.components.PulsingLiveIndicator
 import com.rugbypro.app.ui.components.SectionBackdropBanner
 import com.rugbypro.app.ui.theme.ElectricCyan
 import com.rugbypro.app.ui.theme.MetallicGold
+import com.rugbypro.app.ui.theme.LiveCrimson
+import com.rugbypro.app.ui.theme.PendingAmber
 import com.rugbypro.app.ui.theme.PitchDarkBg
 import com.rugbypro.app.ui.theme.PitchGreen
 import com.rugbypro.app.ui.theme.Spacing
@@ -202,19 +216,80 @@ fun RugbyProRoot(
                                 modifier = Modifier.fillMaxWidth().height(2.dp)
                             )
                         }
-                        AnimatedContent(
-                            targetState = state.currentSection,
-                            label = "sectionTransition"
-                        ) { section ->
-                            when (section) {
-                                AppSection.INICIO -> HomeScreen(state, viewModel)
-                                AppSection.VIVO -> LiveMatchesScreen(state, viewModel)
-                                AppSection.FIXTURE -> FixtureResultsScreen(state, viewModel)
-                                AppSection.TABLAS -> StandingsScreen(state, viewModel)
-                                AppSection.EQUIPOS -> TeamsSquadsScreen(state, viewModel)
-                                AppSection.COMPARACION -> ComparisonScreen(state, viewModel)
-                                AppSection.NOTICIAS -> NewsScreen(state, viewModel)
-                                AppSection.CONFIGURACION -> SettingsScreen(state, viewModel, onRequestNotificationPermission)
+                        if (state.dashboard?.isOfflineFallback == true && !state.isLoading) {
+                            Surface(
+                                color = PendingAmber.copy(alpha = 0.14f),
+                                border = BorderStroke(1.dp, PendingAmber.copy(alpha = 0.45f)),
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.md, vertical = 4.dp),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.sm, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                        Icon(Icons.Outlined.CloudOff, contentDescription = "Sin conexión", tint = PendingAmber, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            text = "Sin conexión. Mostrando últimos datos guardados.",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = PendingAmber
+                                        )
+                                    }
+                                    TextButton(onClick = { viewModel.refreshNow(true) }) {
+                                        Text("Reintentar", style = MaterialTheme.typography.labelSmall, color = MetallicGold)
+                                    }
+                                }
+                            }
+                        } else if (state.syncError != null) {
+                            Surface(
+                                color = LiveCrimson.copy(alpha = 0.14f),
+                                border = BorderStroke(1.dp, LiveCrimson.copy(alpha = 0.45f)),
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.md, vertical = 4.dp),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.sm, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = state.syncError,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    TextButton(onClick = { viewModel.refreshNow(true) }) {
+                                        Text("Reintentar", style = MaterialTheme.typography.labelSmall, color = PitchGreen)
+                                    }
+                                }
+                            }
+                        }
+
+                        PullToRefreshBox(
+                            isRefreshing = state.isSyncing,
+                            onRefresh = { viewModel.refreshNow(forceSnapshot = true) },
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            if (state.isLoading && state.dashboard == null) {
+                                DashboardSkeletonList()
+                            } else {
+                                AnimatedContent(
+                                    targetState = state.currentSection,
+                                    label = "sectionTransition"
+                                ) { section ->
+                                    when (section) {
+                                        AppSection.INICIO -> HomeScreen(state, viewModel)
+                                        AppSection.VIVO -> LiveMatchesScreen(state, viewModel)
+                                        AppSection.FIXTURE -> FixtureResultsScreen(state, viewModel)
+                                        AppSection.TABLAS -> StandingsScreen(state, viewModel)
+                                        AppSection.EQUIPOS -> TeamsSquadsScreen(state, viewModel)
+                                        AppSection.COMPARACION -> ComparisonScreen(state, viewModel)
+                                        AppSection.NOTICIAS -> NewsScreen(state, viewModel)
+                                        AppSection.CONFIGURACION -> SettingsScreen(state, viewModel, onRequestNotificationPermission)
+                                    }
+                                }
                             }
                         }
                     }
@@ -279,6 +354,17 @@ fun RugbyProRoot(
             PlayerDetailDialog(
                 entry = entry,
                 onDismiss = { viewModel.openPlayerDetail(null) }
+            )
+        }
+
+        AnimatedVisibility(
+            visible = !showSplash && !state.config.onboardingCompleted,
+            enter = fadeIn(tween(300)),
+            exit = fadeOut(tween(260))
+        ) {
+            OnboardingOverlay(
+                initialFavorite = state.config.favoriteTeam,
+                onComplete = { fav -> viewModel.completeOnboarding(fav) }
             )
         }
 
@@ -541,14 +627,14 @@ fun HomeScreen(
                 Text("En juego ahora", style = MaterialTheme.typography.titleLarge, color = PitchGreen)
             }
             items(live.take(3), key = { it.id }) { m ->
-                MatchScoreCard(match = m, onClick = { viewModel.openMatchDetail(m) })
+                MatchScoreCard(match = m, favoriteTeam = state.config.favoriteTeam, onClick = { viewModel.openMatchDetail(m) })
             }
         } else if (todayUpcoming.isNotEmpty()) {
             item {
                 Text("Próximos de hoy", style = MaterialTheme.typography.titleLarge, color = ElectricCyan)
             }
             items(todayUpcoming.take(3), key = { it.id }) { m ->
-                MatchScoreCard(match = m, onClick = { viewModel.openMatchDetail(m) })
+                MatchScoreCard(match = m, favoriteTeam = state.config.favoriteTeam, onClick = { viewModel.openMatchDetail(m) })
             }
         }
 
@@ -556,7 +642,7 @@ fun HomeScreen(
             item {
                 Text("Los Pumas XV · Próxima cita", style = MaterialTheme.typography.titleMedium, color = MetallicGold)
                 Spacer(Modifier.height(Spacing.xs))
-                MatchScoreCard(match = pumasXV, onClick = { viewModel.openMatchDetail(pumasXV) })
+                MatchScoreCard(match = pumasXV, favoriteTeam = state.config.favoriteTeam, onClick = { viewModel.openMatchDetail(pumasXV) })
             }
         }
 
@@ -564,7 +650,7 @@ fun HomeScreen(
             item {
                 Text("Los Pumas 7s · Circuito Mundial", style = MaterialTheme.typography.titleMedium, color = ElectricCyan)
                 Spacer(Modifier.height(Spacing.xs))
-                MatchScoreCard(match = pumas7s, onClick = { viewModel.openMatchDetail(pumas7s) })
+                MatchScoreCard(match = pumas7s, favoriteTeam = state.config.favoriteTeam, onClick = { viewModel.openMatchDetail(pumas7s) })
             }
         }
 
@@ -643,6 +729,178 @@ private fun QuickNavCard(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
+        }
+    }
+}
+
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun OnboardingOverlay(
+    initialFavorite: String,
+    onComplete: (String) -> Unit
+) {
+    var step by remember { mutableStateOf(0) }
+    var favorite by remember { mutableStateOf(initialFavorite.ifBlank { "Argentina" }) }
+    val bgRes = if (step == 1) R.drawable.bg_rugby_stadium else R.drawable.bg_rugby_action
+
+    val slides = listOf(
+        Triple(
+            "RUGBY PRO · EN VIVO",
+            "Marcadores, eventos y estadísticas al segundo",
+            "Seguí cada try, conversión, tarjeta y estadística en tiempo real, con alertas inteligentes y cero distracciones."
+        ),
+        Triple(
+            "PRECISIÓN PREVIA AL KICKOFF",
+            "Todo listo 30 minutos antes",
+            "Planteles, entrenadores, camisetas titular y suplente, fotos oficiales y clima del estadio precargados automáticamente incluso sin conexión."
+        ),
+        Triple(
+            "TU EQUIPO FAVORITO",
+            "Personalizá tu experiencia",
+            "Elegí tu selección o club favorito para destacarlo en tablas, rankings mundiales, fixture y partidos en vivo."
+        )
+    )
+    val (_, title, desc) = slides[step]
+    val eyebrow = slides[step].first
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(PitchDarkBg)
+    ) {
+        Image(
+            painter = painterResource(id = bgRes),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize().alpha(0.42f)
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            PitchDarkBg.copy(alpha = 0.65f),
+                            PitchDarkBg.copy(alpha = 0.88f),
+                            PitchDarkBg.copy(alpha = 0.98f)
+                        )
+                    )
+                )
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(Spacing.lg),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Image(
+                        painter = painterResource(id = R.drawable.logo_rugby_master),
+                        contentDescription = "Rugby Pro Logo",
+                        modifier = Modifier.size(44.dp)
+                    )
+                    Spacer(Modifier.width(Spacing.sm))
+                    Text("RUGBY PRO", style = MaterialTheme.typography.titleLarge, color = Color(0xFFF5F5F5))
+                }
+                TextButton(
+                    onClick = { onComplete(favorite) },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Text("Omitir", color = MetallicGold)
+                }
+            }
+
+            Column(modifier = Modifier.fillMaxWidth().padding(vertical = Spacing.lg)) {
+                Text(eyebrow, style = MaterialTheme.typography.labelMedium, color = PitchGreen, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(Spacing.xs))
+                Text(title, style = MaterialTheme.typography.headlineMedium, color = Color(0xFFF5F5F5))
+                Spacer(Modifier.height(Spacing.sm))
+                Text(desc, style = MaterialTheme.typography.bodyLarge, color = Color(0xFFD0D7E2))
+
+                if (step == 2) {
+                    Spacer(Modifier.height(Spacing.md))
+                    val quickTeams = listOf(
+                        "Argentina", "Los Pumas 7s", "Newman", "SIC", "Hindú",
+                        "Pampas", "Dogos XV", "New Zealand", "South Africa", "France", "Ireland", "England"
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        quickTeams.forEach { t ->
+                            FilterChip(
+                                selected = favorite.equals(t, ignoreCase = true),
+                                onClick = { favorite = t },
+                                leadingIcon = if (favorite.equals(t, ignoreCase = true)) {
+                                    { Icon(Icons.Outlined.Star, contentDescription = null, tint = MetallicGold, modifier = Modifier.size(16.dp)) }
+                                } else null,
+                                label = { Text(t) },
+                                colors = rugbyChipColors(),
+                                modifier = Modifier.heightIn(min = 48.dp)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(Spacing.md))
+                    OutlinedTextField(
+                        value = favorite,
+                        onValueChange = { favorite = it },
+                        label = { Text("O escribí otro equipo / club") },
+                        singleLine = true,
+                        colors = rugbyFieldColors(),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    repeat(3) { idx ->
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = if (idx == step) PitchGreen else Color.White.copy(alpha = 0.28f),
+                            modifier = Modifier
+                                .padding(horizontal = 4.dp)
+                                .width(if (idx == step) 28.dp else 10.dp)
+                                .height(6.dp)
+                        ) {}
+                    }
+                }
+                Spacer(Modifier.height(Spacing.md))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                ) {
+                    if (step > 0) {
+                        OutlinedButton(
+                            onClick = { step-- },
+                            modifier = Modifier.weight(1f).heightIn(min = 50.dp)
+                        ) {
+                            Text("Anterior", color = Color(0xFFF5F5F5))
+                        }
+                    }
+                    Button(
+                        onClick = {
+                            if (step < 2) step++ else onComplete(favorite)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = PitchGreen),
+                        modifier = Modifier.weight(1.4f).heightIn(min = 50.dp)
+                    ) {
+                        Text(if (step < 2) "Siguiente" else "Comenzar")
+                    }
+                }
+            }
         }
     }
 }

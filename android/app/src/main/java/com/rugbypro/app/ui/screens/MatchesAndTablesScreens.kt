@@ -18,7 +18,15 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.TipsAndUpdates
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -50,7 +58,10 @@ import com.rugbypro.app.ui.RugbyUiState
 import com.rugbypro.app.ui.RugbyViewModel
 import com.rugbypro.app.ui.components.GlassCard
 import com.rugbypro.app.ui.components.LiveStatsSection
+import com.rugbypro.app.domain.usecase.RugbyDateUtils
+import com.rugbypro.app.ui.components.EmptyLiveMatchesCard
 import com.rugbypro.app.ui.components.MatchScoreCard
+import com.rugbypro.app.ui.components.MatchWeatherCard
 import com.rugbypro.app.ui.components.MatchTimelineSection
 import com.rugbypro.app.ui.components.PulsingLiveIndicator
 import com.rugbypro.app.ui.components.RugbyJerseyBadge
@@ -110,28 +121,44 @@ fun LiveMatchesScreen(
             )
         }
 
-        if (live.isEmpty() && upcomingToday.isEmpty()) {
+        if (!state.config.liveTutorialSeen) {
             item {
-                GlassCard {
-                    Text(
-                        text = "Sin partidos en vivo ni programados para hoy",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
-                    Spacer(Modifier.height(Spacing.xs))
-                    Text(
-                        text = "Cuando comience un encuentro o haya cruces programados en la fecha de hoy, verás aquí el marcador, eventos cronológicos y estadísticas en vivo.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(Spacing.md))
-                    OutlinedButton(
-                        onClick = { viewModel.selectSection(AppSection.FIXTURE) },
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                GlassCard(highlightAccent = true) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Ver agenda completa y resultados en Fixture")
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(
+                                imageVector = Icons.Outlined.TipsAndUpdates,
+                                contentDescription = "Consejo de uso",
+                                tint = MetallicGold,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(Modifier.width(Spacing.sm))
+                            Text(
+                                text = "Tocá cualquier partido para abrir clima del estadio, camisetas, cronología y estadísticas. 30 min antes del inicio precargamos planteles y condiciones.",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        TextButton(
+                            onClick = { viewModel.dismissLiveTutorial() },
+                            modifier = Modifier.heightIn(min = 48.dp)
+                        ) {
+                            Text("Entendido", color = PitchGreen)
+                        }
                     }
                 }
+            }
+        }
+        if (live.isEmpty() && upcomingToday.isEmpty()) {
+            item {
+                EmptyLiveMatchesCard(
+                    onOpenFixture = { viewModel.selectSection(AppSection.FIXTURE) },
+                    onRetry = { viewModel.refreshNow(forceSnapshot = true) }
+                )
             }
         } else {
             if (live.isEmpty()) {
@@ -153,7 +180,7 @@ fun LiveMatchesScreen(
             } else {
                 items(live, key = { it.id }) { m ->
                     Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                        MatchScoreCard(match = m, onClick = { viewModel.openMatchDetail(m) })
+                        MatchScoreCard(match = m, favoriteTeam = state.config.favoriteTeam, onClick = { viewModel.openMatchDetail(m) })
                         GlassCard {
                             Text("Cronología de eventos", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.height(Spacing.sm))
@@ -176,7 +203,7 @@ fun LiveMatchesScreen(
                     )
                 }
                 items(upcomingToday, key = { it.id }) { m ->
-                    MatchScoreCard(match = m, onClick = { viewModel.openMatchDetail(m) })
+                    MatchScoreCard(match = m, favoriteTeam = state.config.favoriteTeam, onClick = { viewModel.openMatchDetail(m) })
                 }
             }
         }
@@ -238,7 +265,8 @@ fun FixtureResultsScreen(
                     null to "Todos",
                     MatchStatus.LIVE to "En vivo",
                     MatchStatus.SCHEDULED to "Próximos",
-                    MatchStatus.FINISHED to "Finalizados"
+                    MatchStatus.FINISHED to "Finalizados",
+                    MatchStatus.POSTPONED to "Postergados"
                 ).forEach { (st, lbl) ->
                     FilterChip(
                         selected = state.fixtureStatus == st,
@@ -278,7 +306,7 @@ fun FixtureResultsScreen(
             }
         } else {
             items(list.take(150), key = { it.id }) { m ->
-                MatchScoreCard(match = m, onClick = { viewModel.openMatchDetail(m) })
+                MatchScoreCard(match = m, favoriteTeam = state.config.favoriteTeam, onClick = { viewModel.openMatchDetail(m) })
             }
         }
     }
@@ -454,104 +482,199 @@ fun MatchDetailDialog(
     match: RugbyMatch,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surface,
-        title = {
-            Column {
-                Text(match.leagueName, style = MaterialTheme.typography.titleMedium, color = MetallicGold)
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "${match.homeName} ${match.homeScore ?: "-"} : ${match.awayScore ?: "-"} ${match.awayName}",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            }
-        },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(Spacing.md)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "${match.dateArg} · ${match.periodDisplay}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
+    val localKickoff = RugbyDateUtils.formatLocalKickoff(match.timestampSec, match.dateArg)
+    val dayPart = match.weather?.dayPart ?: RugbyDateUtils.inferDayPart(match.timestampSec, match.timeArg)
+    val isDraw = match.homeScore != null && match.awayScore != null && match.homeScore == match.awayScore &&
+        (match.status == MatchStatus.FINISHED || match.status == MatchStatus.LIVE)
 
-                // Escudos, banderas y camiseta oficial Titular / Suplente en el cruce
-                GlassCard {
-                    Text("Indumentaria y Equipos", style = MaterialTheme.typography.titleMedium, color = MetallicGold)
-                    Spacer(Modifier.height(Spacing.sm))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(Spacing.md),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MetallicGold.copy(alpha = 0.5f))
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Encabezado fijo (marcador siempre visible aunque se haga scroll)
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
+                    tonalElevation = 4.dp
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Spacing.md, vertical = Spacing.sm)
                     ) {
-                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                            TeamCrestWithFlag(match.homeCrestUrl, match.homeFlagUrl, match.homeName, size = 44.dp)
-                            Spacer(Modifier.height(6.dp))
-                            Text(match.homeName, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                            Spacer(Modifier.height(6.dp))
-                            RugbyJerseyBadge(kit = match.homeKit, size = 34.dp)
-                            Spacer(Modifier.height(4.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Text(
-                                text = if (match.homeActiveKitRole != ActiveKitRole.UNKNOWN) {
-                                    "Juega con ${match.homeActiveKitRole.label}"
-                                } else {
-                                    "Información no disponible"
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (match.homeActiveKitRole != ActiveKitRole.UNKNOWN) PitchGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                                text = match.leagueName,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MetallicGold,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
+                            IconButton(
+                                onClick = onDismiss,
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(Icons.Outlined.Close, contentDescription = "Cerrar detalle del partido")
+                            }
                         }
-                        Spacer(Modifier.width(Spacing.sm))
-                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                            TeamCrestWithFlag(match.awayCrestUrl, match.awayFlagUrl, match.awayName, size = 44.dp)
-                            Spacer(Modifier.height(6.dp))
-                            Text(match.awayName, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                            Spacer(Modifier.height(6.dp))
-                            RugbyJerseyBadge(kit = match.awayKit, size = 34.dp)
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                text = if (match.awayActiveKitRole != ActiveKitRole.UNKNOWN) {
-                                    "Juega con ${match.awayActiveKitRole.label}"
-                                } else {
-                                    "Información no disponible"
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (match.awayActiveKitRole == ActiveKitRole.AWAY) MetallicGold else if (match.awayActiveKitRole == ActiveKitRole.HOME) PitchGreen else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                                TeamCrestWithFlag(match.homeCrestUrl, match.homeFlagUrl, match.homeName, size = 36.dp)
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = match.homeName,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = Spacing.sm)) {
+                                Text(
+                                    text = "${match.homeScore ?: "-"} : ${match.awayScore ?: "-"}",
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    color = if (match.status == MatchStatus.LIVE) PitchGreen else MaterialTheme.colorScheme.onSurface,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = when {
+                                        isDraw && match.status == MatchStatus.FINISHED -> "Empate · Final"
+                                        match.isExtraTime -> "Tiempo extra"
+                                        match.status == MatchStatus.LIVE -> match.minuteDisplay.ifBlank { "EN VIVO" }
+                                        else -> match.periodDisplay
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (match.status == MatchStatus.LIVE) PitchGreen else MetallicGold
+                                )
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                                TeamCrestWithFlag(match.awayCrestUrl, match.awayFlagUrl, match.awayName, size = 36.dp)
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = match.awayName,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
                 }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
 
-                if (match.venueName.isNotBlank() || match.venueCity.isNotBlank()) {
+                // Contenido desplazable
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(Spacing.md),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.md)
+                ) {
+                    val venueLine = listOf(match.venueName, match.venueCity).filter { it.isNotBlank() }.joinToString(", ")
                     Text(
-                        text = "Estadio: ${listOf(match.venueName, match.venueCity).filter { it.isNotBlank() }.joinToString(", ")}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = buildString {
+                            append(localKickoff)
+                            if (venueLine.isNotBlank()) append(" · $venueLine")
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary
                     )
+
+                    if (!match.statusNote.isNullOrBlank()) {
+                        GlassCard {
+                            Text(
+                                text = "${match.status.label}: ${match.statusNote}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MetallicGold
+                            )
+                        }
+                    }
+
+                    MatchWeatherCard(
+                        weather = match.weather,
+                        dayPart = dayPart,
+                        localTimeLabel = localKickoff
+                    )
+
+                    GlassCard {
+                        Text("Indumentaria y Entrenadores", style = MaterialTheme.typography.titleMedium, color = MetallicGold)
+                        Spacer(Modifier.height(Spacing.sm))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(match.homeName, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = match.homeCoach.takeIf { it.isNotBlank() }?.let { "DT: $it" } ?: "DT: Información no disponible",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                RugbyJerseyBadge(kit = match.homeKit, size = 36.dp)
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = if (match.homeActiveKitRole != ActiveKitRole.UNKNOWN) {
+                                        "Juega con ${match.homeActiveKitRole.label}"
+                                    } else {
+                                        "Información no disponible"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (match.homeActiveKitRole != ActiveKitRole.UNKNOWN) PitchGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Spacer(Modifier.width(Spacing.sm))
+                            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(match.awayName, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = match.awayCoach.takeIf { it.isNotBlank() }?.let { "DT: $it" } ?: "DT: Información no disponible",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                RugbyJerseyBadge(kit = match.awayKit, size = 36.dp)
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = if (match.awayActiveKitRole != ActiveKitRole.UNKNOWN) {
+                                        "Juega con ${match.awayActiveKitRole.label}"
+                                    } else {
+                                        "Información no disponible"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (match.awayActiveKitRole == ActiveKitRole.AWAY) MetallicGold else if (match.awayActiveKitRole == ActiveKitRole.HOME) PitchGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    Text("Cronología del partido", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                    MatchTimelineSection(match.events)
+
+                    HorizontalDivider()
+                    Text("Estadísticas en vivo", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.secondary)
+                    LiveStatsSection(match.liveStats)
                 }
-
-                HorizontalDivider()
-                Text("Cronología del partido", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-                MatchTimelineSection(match.events)
-
-                HorizontalDivider()
-                Text("Estadísticas en vivo", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.secondary)
-                LiveStatsSection(match.liveStats)
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Cerrar") }
         }
-    )
+    }
 }

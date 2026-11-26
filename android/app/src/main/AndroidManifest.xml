@@ -12,6 +12,7 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.RugbyPro">
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -21,5 +22,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <receiver
+            android:name=".live.PreMatchAlarmReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.rugbypro.app.ACTION_PREMATCH_PRELOAD" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

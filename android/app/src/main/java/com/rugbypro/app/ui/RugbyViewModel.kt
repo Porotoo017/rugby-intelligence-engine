@@ -30,6 +30,7 @@ import kotlinx.coroutines.launch
 data class RugbyUiState(
     val isLoading: Boolean = true,
     val isSyncing: Boolean = false,
+    val syncError: String? = null,
     val currentSection: AppSection = AppSection.INICIO,
     val config: AppConfig = AppConfig(),
     val dashboard: RugbyDashboard? = null,
@@ -161,7 +162,7 @@ class RugbyViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refreshNow(forceSnapshot: Boolean = true) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isSyncing = true) }
+            _uiState.update { it.copy(isSyncing = true, syncError = null) }
             runCatching {
                 repository.syncWithCascade(forceLiveRefresh = forceSnapshot)
             }.onSuccess { updated ->
@@ -169,8 +170,9 @@ class RugbyViewModel(app: Application) : AndroidViewModel(app) {
                 _uiState.update {
                     it.copy(
                         isSyncing = false,
+                        syncError = null,
                         snackbarMessage = if (updated.isOfflineFallback) {
-                            "Modo sin conexión — mostrando datos guardados"
+                            "Sin conexión. Mostrando últimos datos guardados."
                         } else {
                             "Marcadores y planteles actualizados"
                         }
@@ -180,10 +182,34 @@ class RugbyViewModel(app: Application) : AndroidViewModel(app) {
                 _uiState.update {
                     it.copy(
                         isSyncing = false,
-                        snackbarMessage = "Sin conexión — datos guardados activos"
+                        syncError = "No se pudo actualizar en este momento. Verificá tu conexión e intentá nuevamente.",
+                        snackbarMessage = "Sin conexión. Mostrando últimos datos guardados."
                     )
                 }
             }
+        }
+    }
+
+    fun completeOnboarding(favoriteTeam: String) {
+        viewModelScope.launch {
+            repository.updateConfig {
+                it.copy(
+                    favoriteTeam = favoriteTeam.ifBlank { it.favoriteTeam },
+                    onboardingCompleted = true
+                )
+            }
+        }
+    }
+
+    fun replayOnboarding() {
+        viewModelScope.launch {
+            repository.updateConfig { it.copy(onboardingCompleted = false) }
+        }
+    }
+
+    fun dismissLiveTutorial() {
+        viewModelScope.launch {
+            repository.updateConfig { it.copy(liveTutorialSeen = true) }
         }
     }
 

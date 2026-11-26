@@ -15,6 +15,7 @@ import com.rugbypro.app.domain.model.NewsArticle
 import com.rugbypro.app.domain.model.RugbyDashboard
 import com.rugbypro.app.domain.repository.RugbyRepository
 import com.rugbypro.app.domain.usecase.CrossVerifyMatchesUseCase
+import com.rugbypro.app.live.PreMatchAlarmScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -41,7 +42,9 @@ class RugbyRepositoryImpl(
                 apiTimeoutMs = updated.apiTimeoutMs,
                 notifyTries = updated.notifyTries,
                 notifyRedCards = updated.notifyRedCards,
-                notifyFullTime = updated.notifyFullTime
+                notifyFullTime = updated.notifyFullTime,
+                onboardingCompleted = updated.onboardingCompleted,
+                liveTutorialSeen = updated.liveTutorialSeen
             )
         )
     }
@@ -61,8 +64,10 @@ class RugbyRepositoryImpl(
         val savedIds = dao.getAllSavedNews().map { it.id }.toSet()
         val parsed = RugbyJsonParser.parseEngineSnapshot(payload, savedIds)
         val verifiedMatches = CrossVerifyMatchesUseCase.execute(parsed.matches, emptyList(), fromLocalCacheOnly = true)
+        val withKits = RugbyJsonParser.attachTeamKitsToMatches(verifiedMatches, parsed.teams)
+        runCatching { PreMatchAlarmScheduler.scheduleUpcoming(context, withKits) }
         parsed.copy(
-            matches = RugbyJsonParser.attachTeamKitsToMatches(verifiedMatches, parsed.teams),
+            matches = withKits,
             sourcesHealth = emptyList(),
             isOfflineFallback = true
         )
@@ -110,13 +115,21 @@ class RugbyRepositoryImpl(
             secondary = peerMatches,
             fromLocalCacheOnly = !anyRemoteHealthy
         )
+        val withKits = RugbyJsonParser.attachTeamKitsToMatches(mergedMatches, baseDash.teams)
+        val withWeather = if (anyRemoteHealthy) {
+            runCatching { cascade.enrichMatchesWithWeather(withKits, cfg.apiTimeoutMs) }.getOrDefault(withKits)
+        } else {
+            withKits
+        }
+
+        runCatching { PreMatchAlarmScheduler.scheduleUpcoming(context, withWeather) }
 
         val allSaved = dao.getAllSavedNews().map { it.toDomain() }
         val liveIds = baseDash.news.map { it.id }.toSet()
         val extraSaved = allSaved.filter { it.id !in liveIds }
 
         baseDash.copy(
-            matches = RugbyJsonParser.attachTeamKitsToMatches(mergedMatches, baseDash.teams),
+            matches = withWeather,
             news = baseDash.news + extraSaved,
             sourcesHealth = emptyList(),
             isOfflineFallback = !anyRemoteHealthy

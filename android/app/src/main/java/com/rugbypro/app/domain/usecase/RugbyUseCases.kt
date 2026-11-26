@@ -2,6 +2,10 @@ package com.rugbypro.app.domain.usecase
 
 import com.rugbypro.app.domain.model.ActiveKitRole
 import com.rugbypro.app.domain.model.LiveNotificationAlert
+import com.rugbypro.app.domain.model.MatchDayPart
+import com.rugbypro.app.domain.model.MatchWeather
+import com.rugbypro.app.domain.model.PreMatchScheduleTarget
+import com.rugbypro.app.domain.model.ThermalZone
 import com.rugbypro.app.domain.model.MatchEventType
 import com.rugbypro.app.domain.model.MatchStatus
 import com.rugbypro.app.domain.model.PlayerComparisonResult
@@ -68,6 +72,9 @@ object CrossVerifyMatchesUseCase {
                         periodDisplay = peer.periodDisplay.ifBlank { m.periodDisplay },
                         events = if (peer.events.isNotEmpty()) peer.events else m.events,
                         liveStats = if (peer.liveStats?.hasAnyMetric() == true) peer.liveStats else m.liveStats,
+                        weather = m.weather ?: peer.weather,
+                        statusNote = peer.statusNote ?: m.statusNote,
+                        isExtraTime = m.isExtraTime || peer.isExtraTime,
                         verificationStatus = if (verified) VerificationStatus.VERIFIED else VerificationStatus.PENDING_VERIFICATION,
                         verifiedSources = sources
                     )
@@ -97,7 +104,9 @@ object CrossVerifyMatchesUseCase {
                 when (it.status) {
                     MatchStatus.LIVE -> 0
                     MatchStatus.SCHEDULED -> 1
-                    MatchStatus.FINISHED -> 2
+                    MatchStatus.POSTPONED -> 2
+                    MatchStatus.CANCELLED -> 3
+                    MatchStatus.FINISHED -> 4
                 }
             }.thenBy { if (it.status == MatchStatus.FINISHED) -it.timestampSec else it.timestampSec }
         )
@@ -408,5 +417,99 @@ object DetectKeyLiveEventsUseCase {
             }
         }
         return alerts
+    }
+}
+
+
+object RugbyDateUtils {
+    fun formatLocalKickoff(timestampSec: Long, fallbackDateArg: String): String {
+        if (timestampSec <= 0L) return fallbackDateArg.ifBlank { "Horario por confirmar" }
+        return runCatching {
+            val zone = java.time.ZoneId.systemDefault()
+            val dt = java.time.Instant.ofEpochSecond(timestampSec).atZone(zone)
+            val fmt = java.time.format.DateTimeFormatter.ofPattern("EEE d MMM, HH:mm", Locale("es", "AR"))
+            dt.format(fmt).replaceFirstChar { it.titlecase(Locale("es", "AR")) }
+        }.getOrElse { fallbackDateArg }
+    }
+
+    fun inferDayPart(timestampSec: Long, fallbackTimeArg: String = ""): MatchDayPart {
+        val hour = if (timestampSec > 0L) {
+            runCatching {
+                java.time.Instant.ofEpochSecond(timestampSec)
+                    .atZone(java.time.ZoneId.systemDefault())
+                    .hour
+            }.getOrNull()
+        } else {
+            fallbackTimeArg.substringBefore(":").trim().toIntOrNull()
+        }
+        return when (hour) {
+            null -> MatchDayPart.DESCONOCIDO
+            in 6..12 -> MatchDayPart.DIA
+            in 13..18 -> MatchDayPart.TARDE
+            else -> MatchDayPart.NOCHE
+        }
+    }
+
+    fun formatPercent(value: Double?): String =
+        if (value == null) "No disponible" else String.format(Locale.US, "%.1f%%", value)
+}
+
+object WeatherClassificationUseCase {
+    fun thermalZoneFor(tempC: Double?): ThermalZone? = when {
+        tempC == null -> null
+        tempC < 13.0 -> ThermalZone.FRIO
+        tempC < 25.0 -> ThermalZone.TEMPLADO
+        else -> ThermalZone.CALOR
+    }
+
+    fun windCompass(degrees: Double?): String? {
+        if (degrees == null) return null
+        val dirs = listOf("N", "NE", "E", "SE", "S", "SO", "O", "NO")
+        val idx = (((degrees % 360.0) + 360.0) % 360.0 / 45.0).let { kotlin.math.round(it).toInt() % 8 }
+        return dirs[idx]
+    }
+
+    fun mapWmoCondition(wmoCode: Int?, windSpeedKmh: Double?): Pair<String, String> {
+        if (wmoCode == null) return "Clima no disponible" to "unknown"
+        return when (wmoCode) {
+            0 -> if ((windSpeedKmh ?: 0.0) >= 34.0) "Soleado con viento" to "wind" else "Despejado" to "sun"
+            1, 2 -> "Parcialmente nublado" to "cloudy"
+            3, 45, 48 -> "Nublado" to "cloudy"
+            51, 53, 55, 56, 57 -> "Llovizna" to "drizzle"
+            61, 63, 65, 66, 67, 80, 81, 82 -> "Lluvia" to "rain"
+            71, 73, 75, 77, 85, 86 -> "Nieve" to "snow"
+            95, 96, 99 -> "Tormenta" to "storm"
+            else -> if ((windSpeedKmh ?: 0.0) >= 34.0) "Viento fuerte" to "wind" else "Variable" to "cloudy"
+        }
+    }
+}
+
+object PreMatchWindowUseCase {
+    private const val PRELOAD_LEAD_MS = 30L * 60L * 1000L
+    private const val MAX_HORIZON_MS = 48L * 60L * 60L * 1000L
+
+    fun computeTargets(
+        matches: List<RugbyMatch>,
+        nowMs: Long = System.currentTimeMillis()
+    ): List<PreMatchScheduleTarget> {
+        return matches.mapNotNull { m ->
+            if (m.status != MatchStatus.SCHEDULED || m.timestampSec <= 0L) return@mapNotNull null
+            val kickoffMs = m.timestampSec * 1000L
+            if (kickoffMs <= nowMs || (kickoffMs - nowMs) > MAX_HORIZON_MS) return@mapNotNull null
+            val triggerAt = (kickoffMs - PRELOAD_LEAD_MS).coerceAtLeast(nowMs)
+            PreMatchScheduleTarget(
+                matchId = m.id,
+                matchTitle = "${m.homeName} vs ${m.awayName}",
+                kickoffMs = kickoffMs,
+                triggerAtMs = triggerAt
+            )
+        }.sortedBy { it.triggerAtMs }
+    }
+
+    fun isInsideThirtyMinuteWindow(match: RugbyMatch, nowMs: Long = System.currentTimeMillis()): Boolean {
+        if (match.status != MatchStatus.SCHEDULED || match.timestampSec <= 0L) return false
+        val kickoffMs = match.timestampSec * 1000L
+        val diff = kickoffMs - nowMs
+        return diff in 1L..PRELOAD_LEAD_MS
     }
 }

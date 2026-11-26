@@ -3,7 +3,9 @@ package com.rugbypro.app.domain.model
 enum class MatchStatus(val label: String) {
     LIVE("EN VIVO"),
     SCHEDULED("PROGRAMADO"),
-    FINISHED("FINALIZADO")
+    FINISHED("FINALIZADO"),
+    POSTPONED("POSTERGADO"),
+    CANCELLED("CANCELADO")
 }
 
 // Uso estrictamente interno de validación cruzada (nunca expuesto en UI)
@@ -45,6 +47,41 @@ enum class ActiveKitRole(val label: String) {
     AWAY("Suplente"),
     UNKNOWN("Información no disponible")
 }
+
+enum class MatchDayPart(val label: String) {
+    DIA("Día"),
+    TARDE("Tarde"),
+    NOCHE("Noche"),
+    DESCONOCIDO("Horario N/D")
+}
+
+enum class ThermalZone(val label: String) {
+    FRIO("Frío"),
+    TEMPLADO("Templado"),
+    CALOR("Calor")
+}
+
+data class MatchWeather(
+    val tempC: Double? = null,
+    val feelsLikeC: Double? = null,
+    val conditionLabel: String = "Clima no disponible",
+    val conditionCode: String = "unknown", // "sun" | "cloudy" | "rain" | "drizzle" | "storm" | "snow" | "wind" | "unknown"
+    val rainProbabilityPct: Int? = null,
+    val windSpeedKmh: Double? = null,
+    val windDirection: String? = null,
+    val humidityPct: Int? = null,
+    val dayPart: MatchDayPart = MatchDayPart.DESCONOCIDO,
+    val thermalZone: ThermalZone? = null,
+    val updatedAtLabel: String = "",
+    val isAvailable: Boolean = false
+)
+
+data class PreMatchScheduleTarget(
+    val matchId: String,
+    val matchTitle: String,
+    val kickoffMs: Long,
+    val triggerAtMs: Long
+)
 
 data class TeamKit(
     val verified: Boolean = true,
@@ -125,7 +162,10 @@ data class RugbyMatch(
     val homeKit: TeamKit? = null,
     val awayKit: TeamKit? = null,
     val homeActiveKitRole: ActiveKitRole = ActiveKitRole.UNKNOWN,
-    val awayActiveKitRole: ActiveKitRole = ActiveKitRole.UNKNOWN
+    val awayActiveKitRole: ActiveKitRole = ActiveKitRole.UNKNOWN,
+    val weather: MatchWeather? = null,
+    val statusNote: String? = null,
+    val isExtraTime: Boolean = false
 )
 
 data class CompetitionItem(
@@ -250,7 +290,9 @@ data class AppConfig(
     val apiTimeoutMs: Long = 10000L,
     val notifyTries: Boolean = true,
     val notifyRedCards: Boolean = true,
-    val notifyFullTime: Boolean = true
+    val notifyFullTime: Boolean = true,
+    val onboardingCompleted: Boolean = false,
+    val liveTutorialSeen: Boolean = false
 )
 
 data class LiveNotificationAlert(

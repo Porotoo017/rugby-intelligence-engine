@@ -87,7 +87,9 @@ data class AppConfigEntity(
     val apiTimeoutMs: Long = 10000L,
     val notifyTries: Boolean = true,
     val notifyRedCards: Boolean = true,
-    val notifyFullTime: Boolean = true
+    val notifyFullTime: Boolean = true,
+    val onboardingCompleted: Boolean = false,
+    val liveTutorialSeen: Boolean = false
 ) {
     fun toDomain() = AppConfig(
         themeMode = runCatching { ThemeMode.valueOf(themeMode) }.getOrDefault(ThemeMode.DARK),
@@ -96,7 +98,9 @@ data class AppConfigEntity(
         apiTimeoutMs = apiTimeoutMs,
         notifyTries = notifyTries,
         notifyRedCards = notifyRedCards,
-        notifyFullTime = notifyFullTime
+        notifyFullTime = notifyFullTime,
+        onboardingCompleted = onboardingCompleted,
+        liveTutorialSeen = liveTutorialSeen
     )
 }
 
@@ -150,7 +154,7 @@ interface RugbyDao {
         NotifiedEventEntity::class,
         AppConfigEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class RugbyProDatabase : RoomDatabase() {
@@ -166,7 +170,7 @@ abstract class RugbyProDatabase : RoomDatabase() {
                     context.applicationContext,
                     RugbyProDatabase::class.java,
                     "rugby_pro.db"
-                ).build().also { INSTANCE = it }
+                ).fallbackToDestructiveMigration().build().also { INSTANCE = it }
             }
         }
     }

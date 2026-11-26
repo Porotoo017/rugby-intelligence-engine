@@ -2344,6 +2344,7 @@ def main() -> None:
         },
     }
 
+    preserve_enriched_media_and_kits(payload, OUT_DATA_JSON)
     for path in (OUT_DATA_JSON, OUT_ROOT_JSON):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False)

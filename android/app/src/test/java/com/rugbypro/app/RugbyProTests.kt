@@ -9,7 +9,13 @@ import com.rugbypro.app.domain.model.PlayerProfile
 import com.rugbypro.app.domain.model.RugbyMatch
 import com.rugbypro.app.domain.model.TeamKit
 import com.rugbypro.app.domain.model.TeamProfile
+import com.rugbypro.app.data.remote.RugbyCascadeClient
+import com.rugbypro.app.domain.model.MatchDayPart
+import com.rugbypro.app.domain.model.ThermalZone
 import com.rugbypro.app.domain.model.VerificationStatus
+import com.rugbypro.app.domain.usecase.PreMatchWindowUseCase
+import com.rugbypro.app.domain.usecase.RugbyDateUtils
+import com.rugbypro.app.domain.usecase.WeatherClassificationUseCase
 import com.rugbypro.app.domain.usecase.CompareTeamsUseCase
 import com.rugbypro.app.domain.usecase.CrossVerifyMatchesUseCase
 import com.rugbypro.app.domain.usecase.DetectKeyLiveEventsUseCase
@@ -185,5 +191,53 @@ class RugbyProTests {
         assertEquals(1, parsed.size)
         assertEquals(MatchStatus.LIVE, parsed.first().status)
         assertEquals(21, parsed.first().homeScore)
+    }
+
+    @Test
+    fun `weather parser extracts open meteo forecast and thermal classification`() {
+        val json = """
+            {
+              "current": {
+                "temperature_2m": 11.4,
+                "apparent_temperature": 8.9,
+                "relative_humidity_2m": 82,
+                "weather_code": 61,
+                "wind_speed_10m": 24.5,
+                "wind_direction_10m": 180.0
+              },
+              "hourly": {
+                "precipitation_probability": [75]
+              }
+            }
+        """.trimIndent()
+        val w = RugbyCascadeClient.parseOpenMeteoForecast(json, MatchDayPart.TARDE)
+        assertEquals(true, w?.isAvailable)
+        assertEquals(ThermalZone.FRIO, w?.thermalZone)
+        assertEquals("Lluvia", w?.conditionLabel)
+        assertEquals("S", w?.windDirection)
+        assertEquals(75, w?.rainProbabilityPct)
+        assertEquals(82, w?.humidityPct)
+        assertEquals(MatchDayPart.TARDE, w?.dayPart)
+    }
+
+    @Test
+    fun `prematch window computes exact 30 minute trigger before kickoff`() {
+        val nowMs = 1_700_000_000_000L
+        val kickoffSec = (nowMs / 1000L) + 3600L // en 60 minutos
+        val m = sampleMatch("pm1", "s", MatchStatus.SCHEDULED, null, null, tsSec = kickoffSec)
+        val targets = PreMatchWindowUseCase.computeTargets(listOf(m), nowMs = nowMs)
+        assertEquals(1, targets.size)
+        assertEquals((kickoffSec * 1000L) - 30L * 60L * 1000L, targets.first().triggerAtMs)
+        val inWindow = sampleMatch("pm2", "s", MatchStatus.SCHEDULED, null, null, tsSec = (nowMs / 1000L) + 900L)
+        assertTrue(PreMatchWindowUseCase.isInsideThirtyMinuteWindow(inWindow, nowMs = nowMs))
+    }
+
+    @Test
+    fun `weather thermal zones and date utils format cleanly`() {
+        assertEquals(ThermalZone.FRIO, WeatherClassificationUseCase.thermalZoneFor(9.0))
+        assertEquals(ThermalZone.TEMPLADO, WeatherClassificationUseCase.thermalZoneFor(18.5))
+        assertEquals(ThermalZone.CALOR, WeatherClassificationUseCase.thermalZoneFor(29.0))
+        assertEquals("58.3%", RugbyDateUtils.formatPercent(58.34))
+        assertEquals(MatchDayPart.NOCHE, RugbyDateUtils.inferDayPart(0L, "21:15"))
     }
 }

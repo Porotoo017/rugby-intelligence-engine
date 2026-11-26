@@ -1,11 +1,16 @@
 package com.rugbypro.app.ui.components
 
 import androidx.annotation.DrawableRes
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -28,12 +33,28 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AcUnit
+import androidx.compose.material.icons.outlined.Air
+import androidx.compose.material.icons.outlined.Cancel
+import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.NightsStay
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.SportsRugby
+import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.Thunderstorm
+import androidx.compose.material.icons.outlined.Warning
+import androidx.compose.material.icons.outlined.WaterDrop
+import androidx.compose.material.icons.outlined.WbSunny
+import androidx.compose.material.icons.outlined.WbTwilight
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -62,8 +83,12 @@ import com.rugbypro.app.domain.model.LiveMatchStats
 import com.rugbypro.app.domain.model.MatchEvent
 import com.rugbypro.app.domain.model.MatchEventType
 import com.rugbypro.app.domain.model.MatchStatus
+import com.rugbypro.app.domain.model.MatchDayPart
+import com.rugbypro.app.domain.model.MatchWeather
 import com.rugbypro.app.domain.model.RugbyMatch
 import com.rugbypro.app.domain.model.TeamKit
+import com.rugbypro.app.domain.model.ThermalZone
+import com.rugbypro.app.domain.usecase.RugbyDateUtils
 import com.rugbypro.app.ui.theme.ElectricCyan
 import com.rugbypro.app.ui.theme.LiveCrimson
 import com.rugbypro.app.ui.theme.MetallicGold
@@ -461,11 +486,20 @@ fun RugbyJerseyBadge(
 fun MatchScoreCard(
     match: RugbyMatch,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    favoriteTeam: String = ""
 ) {
+    val isFavorite = favoriteTeam.isNotBlank() && (
+        match.homeName.contains(favoriteTeam, ignoreCase = true) ||
+            match.awayName.contains(favoriteTeam, ignoreCase = true)
+        )
+    val localDateDisplay = RugbyDateUtils.formatLocalKickoff(match.timestampSec, match.dateArg)
+    val isDraw = match.homeScore != null && match.awayScore != null && match.homeScore == match.awayScore &&
+        (match.status == MatchStatus.FINISHED || match.status == MatchStatus.LIVE)
+
     GlassCard(
         modifier = modifier,
-        highlightAccent = match.status == MatchStatus.LIVE || match.isArgentina,
+        highlightAccent = match.status == MatchStatus.LIVE || match.isArgentina || isFavorite,
         onClick = onClick
     ) {
         Row(
@@ -473,32 +507,78 @@ fun MatchScoreCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = match.leagueShort.ifBlank { match.leagueName },
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.secondary,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.weight(1f)
-            )
+            ) {
+                if (isFavorite) {
+                    Icon(
+                        imageVector = Icons.Outlined.Star,
+                        contentDescription = "Equipo favorito",
+                        tint = MetallicGold,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                }
+                Text(
+                    text = match.leagueShort.ifBlank { match.leagueName },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.secondary,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
             Spacer(Modifier.width(Spacing.sm))
             when (match.status) {
                 MatchStatus.LIVE -> PulsingLiveIndicator(
                     label = if (match.minuteDisplay.isNotBlank()) "EN VIVO · ${match.minuteDisplay}" else "EN VIVO"
                 )
                 MatchStatus.FINISHED -> Text(
-                    text = "FINALIZADO",
+                    text = if (isDraw) "FINAL · EMPATE" else "FINALIZADO",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (isDraw) MetallicGold else MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.SemiBold
                 )
+                MatchStatus.POSTPONED -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Schedule, contentDescription = "Postergado", tint = PendingAmber, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("POSTERGADO", style = MaterialTheme.typography.labelSmall, color = PendingAmber, fontWeight = FontWeight.Bold)
+                }
+                MatchStatus.CANCELLED -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Cancel, contentDescription = "Cancelado", tint = LiveCrimson, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("CANCELADO", style = MaterialTheme.typography.labelSmall, color = LiveCrimson, fontWeight = FontWeight.Bold)
+                }
                 MatchStatus.SCHEDULED -> Text(
-                    text = "${match.dayArg} ${match.timeArg}".trim().ifBlank { match.dateArg },
+                    text = localDateDisplay,
                     style = MaterialTheme.typography.labelSmall,
                     color = ElectricCyan,
                     fontWeight = FontWeight.SemiBold
                 )
+            }
+        }
+
+        if (match.isExtraTime || !match.statusNote.isNullOrBlank()) {
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm), verticalAlignment = Alignment.CenterVertically) {
+                if (match.isExtraTime) {
+                    Text(
+                        text = "TIEMPO EXTRA",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MetallicGold,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                if (!match.statusNote.isNullOrBlank()) {
+                    Text(
+                        text = match.statusNote,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
 
@@ -509,7 +589,6 @@ fun MatchScoreCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // Local
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.weight(1f)
@@ -536,12 +615,11 @@ fun MatchScoreCard(
                 }
             }
 
-            // Marcador central
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.padding(horizontal = Spacing.sm)
             ) {
-                if (match.status == MatchStatus.SCHEDULED && match.homeScore == null) {
+                if ((match.status == MatchStatus.SCHEDULED || match.status == MatchStatus.POSTPONED || match.status == MatchStatus.CANCELLED) && match.homeScore == null) {
                     Text(
                         text = "VS",
                         style = MaterialTheme.typography.headlineSmall,
@@ -553,20 +631,31 @@ fun MatchScoreCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
+                    AnimatedContent(
+                        targetState = "${match.homeScore ?: 0} - ${match.awayScore ?: 0}",
+                        transitionSpec = {
+                            (fadeIn(tween(240)) + scaleIn(initialScale = 0.92f, animationSpec = tween(240))) togetherWith fadeOut(tween(180))
+                        },
+                        label = "scoreTransition"
+                    ) { scoreText ->
+                        Text(
+                            text = scoreText,
+                            style = MaterialTheme.typography.displaySmall,
+                            color = if (match.status == MatchStatus.LIVE) PitchGreen else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                     Text(
-                        text = "${match.homeScore ?: 0} - ${match.awayScore ?: 0}",
-                        style = MaterialTheme.typography.displaySmall,
-                        color = if (match.status == MatchStatus.LIVE) PitchGreen else MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = match.periodDisplay.ifBlank { match.status.label },
+                        text = when {
+                            isDraw && match.status == MatchStatus.FINISHED -> "Empate"
+                            match.isExtraTime -> "Tiempo extra"
+                            else -> match.periodDisplay.ifBlank { match.status.label }
+                        },
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = if (isDraw) MetallicGold else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
 
-            // Visitante
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.weight(1f)
@@ -595,7 +684,10 @@ fun MatchScoreCard(
         }
 
         val venueText = listOf(match.venueName, match.venueCity).filter { it.isNotBlank() }.joinToString(", ")
-        if (venueText.isNotBlank() || match.homeKit == null || match.awayKit == null) {
+        val weatherSummary = match.weather?.takeIf { it.isAvailable && it.tempC != null }?.let {
+            "${String.format(java.util.Locale.US, "%.0f", it.tempC)}°C · ${it.conditionLabel}"
+        }
+        if (venueText.isNotBlank() || weatherSummary != null || match.homeKit == null || match.awayKit == null) {
             Spacer(Modifier.height(Spacing.sm))
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
             Spacer(Modifier.height(Spacing.sm))
@@ -612,13 +704,314 @@ fun MatchScoreCard(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                if (match.homeKit == null || match.awayKit == null) {
+                if (weatherSummary != null) {
+                    Spacer(Modifier.width(Spacing.sm))
+                    Text(
+                        text = weatherSummary,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ElectricCyan,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                } else if (match.homeKit == null || match.awayKit == null) {
                     Spacer(Modifier.width(Spacing.sm))
                     Text(
                         text = "Indumentaria: Información no disponible",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MatchWeatherCard(
+    weather: MatchWeather?,
+    dayPart: MatchDayPart,
+    localTimeLabel: String
+) {
+    GlassCard {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Clima y Condiciones",
+                style = MaterialTheme.typography.titleMedium,
+                color = ElectricCyan
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val dpIcon = when (dayPart) {
+                    MatchDayPart.DIA -> Icons.Outlined.WbSunny
+                    MatchDayPart.TARDE -> Icons.Outlined.WbTwilight
+                    MatchDayPart.NOCHE -> Icons.Outlined.NightsStay
+                    MatchDayPart.DESCONOCIDO -> Icons.Outlined.Schedule
+                }
+                Icon(dpIcon, contentDescription = "Horario ${dayPart.label}", tint = MetallicGold, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    text = "${dayPart.label} · $localTimeLabel",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MetallicGold
+                )
+            }
+        }
+        Spacer(Modifier.height(Spacing.sm))
+        if (weather == null || !weather.isAvailable || weather.tempC == null) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = Spacing.sm),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Outlined.Cloud, contentDescription = "Clima no disponible", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(32.dp))
+                Spacer(Modifier.width(Spacing.md))
+                Column {
+                    Text(
+                        text = "Clima no disponible",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Se actualizará automáticamente al confirmarse la estación del estadio.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            return@GlassCard
+        }
+
+        val wIcon = when (weather.conditionCode) {
+            "sun" -> Icons.Outlined.WbSunny
+            "rain" -> Icons.Outlined.WaterDrop
+            "drizzle" -> Icons.Outlined.WaterDrop
+            "storm" -> Icons.Outlined.Thunderstorm
+            "snow" -> Icons.Outlined.AcUnit
+            "wind" -> Icons.Outlined.Air
+            else -> Icons.Outlined.Cloud
+        }
+        val zoneColor = when (weather.thermalZone) {
+            ThermalZone.FRIO -> ElectricCyan
+            ThermalZone.TEMPLADO -> PitchGreen
+            ThermalZone.CALOR -> PendingAmber
+            null -> MaterialTheme.colorScheme.onSurfaceVariant
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(wIcon, contentDescription = weather.conditionLabel, tint = ElectricCyan, modifier = Modifier.size(46.dp))
+                Spacer(Modifier.width(Spacing.md))
+                Column {
+                    Text(
+                        text = String.format(java.util.Locale.US, "%.1f °C", weather.tempC),
+                        style = MaterialTheme.typography.displaySmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = weather.conditionLabel,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                weather.thermalZone?.let { tz ->
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = zoneColor.copy(alpha = 0.16f),
+                        border = BorderStroke(1.dp, zoneColor.copy(alpha = 0.55f))
+                    ) {
+                        Text(
+                            text = tz.label.uppercase(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = zoneColor,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
+                val feelsText = weather.feelsLikeC?.let {
+                    "Sensación ${String.format(java.util.Locale.US, "%.1f °C", it)}"
+                } ?: "Sensación N/D"
+                Text(feelsText, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        Spacer(Modifier.height(Spacing.md))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+        ) {
+            WeatherMetricTile(
+                label = "Lluvia",
+                value = weather.rainProbabilityPct?.let { "$it%" } ?: "N/D",
+                modifier = Modifier.weight(1f)
+            )
+            WeatherMetricTile(
+                label = "Viento",
+                value = weather.windSpeedKmh?.let {
+                    "${String.format(java.util.Locale.US, "%.0f", it)} km/h ${weather.windDirection.orEmpty()}".trim()
+                } ?: "N/D",
+                modifier = Modifier.weight(1f)
+            )
+            WeatherMetricTile(
+                label = "Humedad",
+                value = weather.humidityPct?.let { "$it%" } ?: "N/D",
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun WeatherMetricTile(label: String, value: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+    ) {
+        Column(modifier = Modifier.padding(Spacing.sm), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(2.dp))
+            Text(value, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+        }
+    }
+}
+
+@Composable
+fun ShimmerSkeletonCard(modifier: Modifier = Modifier) {
+    val inf = rememberInfiniteTransition(label = "skeletonPulse")
+    val alpha by inf.animateFloat(
+        initialValue = 0.22f,
+        targetValue = 0.52f,
+        animationSpec = infiniteRepeatable(tween(780), RepeatMode.Reverse),
+        label = "skeletonAlpha"
+    )
+    GlassCard(modifier = modifier) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.45f)
+                .height(14.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = alpha))
+        )
+        Spacer(Modifier.height(Spacing.md))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = alpha))
+            )
+            Box(
+                modifier = Modifier
+                    .width(84.dp)
+                    .height(28.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(PitchGreen.copy(alpha = alpha))
+            )
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = alpha))
+            )
+        }
+        Spacer(Modifier.height(Spacing.md))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.75f)
+                .height(12.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = alpha * 0.7f))
+        )
+    }
+}
+
+@Composable
+fun DashboardSkeletonList() {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(Spacing.md),
+        verticalArrangement = Arrangement.spacedBy(Spacing.md)
+    ) {
+        repeat(4) {
+            ShimmerSkeletonCard()
+        }
+    }
+}
+
+@Composable
+fun EmptyLiveMatchesCard(
+    onOpenFixture: () -> Unit,
+    onRetry: () -> Unit
+) {
+    GlassCard {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(vertical = Spacing.sm),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Canvas(
+                modifier = Modifier
+                    .size(72.dp)
+                    .semantics { contentDescription = "Cancha de rugby sin partidos activos" }
+            ) {
+                val w = size.width
+                val h = size.height
+                drawRoundRect(
+                    color = PitchGreen.copy(alpha = 0.22f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(16f, 16f),
+                    style = Stroke(width = 3f)
+                )
+                drawLine(color = PitchGreen.copy(alpha = 0.35f), start = Offset(w * 0.5f, 4f), end = Offset(w * 0.5f, h - 4f), strokeWidth = 2f)
+                drawOval(
+                    color = MetallicGold.copy(alpha = 0.85f),
+                    topLeft = Offset(w * 0.31f, h * 0.36f),
+                    size = androidx.compose.ui.geometry.Size(w * 0.38f, h * 0.28f),
+                    style = Stroke(width = 3f)
+                )
+            }
+            Spacer(Modifier.height(Spacing.md))
+            Text(
+                text = "No hay partidos en vivo ahora",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.secondary,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(Spacing.xs))
+            Text(
+                text = "Cuando comience un encuentro o haya partidos programados para hoy, verás el marcador minuto a minuto, estadísticas y eventos aquí.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(Spacing.md))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+            ) {
+                OutlinedButton(
+                    onClick = onRetry,
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp)
+                ) {
+                    Text("Reintentar")
+                }
+                Button(
+                    onClick = onOpenFixture,
+                    colors = ButtonDefaults.buttonColors(containerColor = PitchGreen),
+                    modifier = Modifier.weight(1.4f).heightIn(min = 48.dp)
+                ) {
+                    Text("Ver Fixture")
                 }
             }
         }
@@ -674,11 +1067,31 @@ fun MatchTimelineSection(events: List<MatchEvent>) {
                         )
                     }
                 }
-                Text(
-                    text = if (ev.teamSide == "home") "LOCAL" else "VISITA",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = accent
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (ev.type == MatchEventType.YELLOW_CARD || ev.type == MatchEventType.RED_CARD) {
+                        Icon(
+                            imageVector = Icons.Outlined.Warning,
+                            contentDescription = ev.type.label,
+                            tint = accent,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                    } else if (ev.type == MatchEventType.TRY) {
+                        Icon(
+                            imageVector = Icons.Outlined.SportsRugby,
+                            contentDescription = "Try",
+                            tint = accent,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    Text(
+                        text = if (ev.teamSide == "home") "LOCAL" else "VISITA",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = accent,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
     }
