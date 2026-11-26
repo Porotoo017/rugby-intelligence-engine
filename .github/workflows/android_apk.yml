@@ -1,0 +1,65 @@
+name: Build Rugby Pro Android APK & Brand Kit
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'android/**'
+      - 'brand-kit/**'
+      - 'ios-assets/**'
+      - '.github/workflows/android_apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Run Kotlin Unit Tests (JVM)
+        working-directory: android
+        run: gradle testDebugUnitTest --no-daemon
+
+      - name: Build Debug APK
+        working-directory: android
+        run: gradle assembleDebug --no-daemon
+
+      - name: Package APK and iOS/BrandKit Bundle
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk Rugby-Pro.apk
+          zip -r Rugby-Pro-iOS-BrandKit.zip brand-kit ios-assets
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rugby-Pro-Artifacts
+          path: |
+            Rugby-Pro.apk
+            Rugby-Pro-iOS-BrandKit.zip
+
+      - name: Publish APK & BrandKit to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v3.0-rugby-pro
+          name: Rugby Pro (Android APK + iOS BrandKit)
+          body: |
+            - **Android APK (`Rugby-Pro.apk`)**: Kotlin + Jetpack Compose + Material 3, Navigation Drawer, Live Match Center, Room Offline Cache, WorkManager Push Alerts & Adaptive Icon.
+            - **iOS + Brand Kit (`Rugby-Pro-iOS-BrandKit.zip`)**: Transparent 1024x1024 master logo, dark vertical/horizontal splashes, monochrome gold/white/dark variants, and Xcode `AppIcon.appiconset` + `LaunchImage.imageset`.
+          files: |
+            Rugby-Pro.apk
+            Rugby-Pro-iOS-BrandKit.zip
