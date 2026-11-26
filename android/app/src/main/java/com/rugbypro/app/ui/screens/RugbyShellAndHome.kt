@@ -573,16 +573,13 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
             ) {
-                QuickNavCard("Fixture y
-resultados", Icons.Outlined.CalendarMonth, Modifier.weight(1f)) {
+                QuickNavCard("Fixture y\nresultados", Icons.Outlined.CalendarMonth, Modifier.weight(1f)) {
                     viewModel.selectSection(AppSection.FIXTURE)
                 }
-                QuickNavCard("Tabla de
-posiciones", Icons.Outlined.EmojiEvents, Modifier.weight(1f)) {
+                QuickNavCard("Tabla de\nposiciones", Icons.Outlined.EmojiEvents, Modifier.weight(1f)) {
                     viewModel.selectSection(AppSection.TABLAS)
                 }
-                QuickNavCard("Comparar
-equipos", Icons.Outlined.CompareArrows, Modifier.weight(1f)) {
+                QuickNavCard("Comparar\nequipos", Icons.Outlined.CompareArrows, Modifier.weight(1f)) {
                     viewModel.selectSection(AppSection.COMPARACION)
                 }
             }
