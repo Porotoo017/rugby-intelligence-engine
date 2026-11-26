@@ -176,7 +176,7 @@ fun TeamCrestWithFlag(
     size: Dp = 44.dp
 ) {
     val initials = teamName.trim()
-        .split(Regex("\s+"))
+        .split(Regex("\\s+"))
         .filter { it.isNotBlank() }
         .take(2)
         .joinToString("") { it.first().uppercaseChar().toString() }
