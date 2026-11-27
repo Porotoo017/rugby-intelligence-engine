@@ -91,7 +91,9 @@ import com.rugbypro.app.domain.model.MatchStatus
 import com.rugbypro.app.domain.model.MatchDayPart
 import com.rugbypro.app.domain.model.MatchOfficial
 import com.rugbypro.app.domain.model.PlayerProfile
+import androidx.compose.ui.platform.LocalUriHandler
 import com.rugbypro.app.domain.model.MatchWeather
+import com.rugbypro.app.domain.model.NewsArticle
 import com.rugbypro.app.domain.model.RugbyMatch
 import com.rugbypro.app.domain.model.TeamKit
 import com.rugbypro.app.domain.model.ThermalZone
@@ -1281,12 +1283,18 @@ fun LiveStatsSection(stats: LiveMatchStats?) {
         return
     }
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+        StatCompareRow("Tries", stats.triesHome, stats.triesAway)
+        StatCompareRow("Conversiones", stats.conversionsHome, stats.conversionsAway)
         StatCompareRow("Posesión (%)", stats.possessionHomePct, stats.possessionAwayPct, suffix = "%")
         StatCompareRow("Territorio (%)", stats.territoryHomePct, stats.territoryAwayPct, suffix = "%")
+        StatCompareRow("Metros recorridos", stats.metresHome, stats.metresAway)
+        StatCompareRow("Quiebres limpios", stats.cleanBreaksHome, stats.cleanBreaksAway)
+        StatCompareRow("Defensores superados", stats.defendersBeatenHome, stats.defendersBeatenAway)
         StatCompareRow("Tackles", stats.tacklesHome, stats.tacklesAway)
+        StatCompareRow("Turnovers ganados", stats.turnoversWonHome, stats.turnoversWonAway)
         StatCompareRow("Lineouts ganados", stats.lineoutsWonHome, stats.lineoutsWonAway)
         StatCompareRow("Scrums ganados", stats.scrumsWonHome, stats.scrumsWonAway)
-        StatCompareRow("Penalidades", stats.penaltiesHome, stats.penaltiesAway)
+        StatCompareRow("Penalidades concedidas", stats.penaltiesHome, stats.penaltiesAway)
     }
 }
 
@@ -1531,6 +1539,132 @@ fun MatchLineupShowcaseCard(
                             overflow = TextOverflow.Ellipsis,
                             textAlign = TextAlign.Center
                         )
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
+fun MatchLiveCoverageSection(
+    match: RugbyMatch,
+    allNews: List<NewsArticle>
+) {
+    val uriHandler = LocalUriHandler.current
+    val homeToken = match.homeName.lowercase().replace(" 7s", "").trim()
+    val awayToken = match.awayName.lowercase().replace(" 7s", "").trim()
+    val isSevens = match.group.equals("sevens", true) ||
+        match.leagueName.contains("sevens", true) ||
+        match.leagueName.contains("svns", true) ||
+        match.homeName.contains("7s", true)
+
+    val relatedNews = allNews.filter { art ->
+        val hay = "${art.title} ${art.summary} ${art.category}".lowercase()
+        (homeToken.length >= 4 && homeToken in hay) ||
+            (awayToken.length >= 4 && awayToken in hay) ||
+            (isSevens && ("svns" in hay || "sevens" in hay || " 7s" in hay || "dubai" in hay)) ||
+            (match.leagueShort.length >= 4 && match.leagueShort.lowercase() in hay)
+    }.take(4)
+
+    val statusHeadline = when (match.status) {
+        MatchStatus.LIVE -> buildString {
+            append("EN VIVO")
+            if (match.periodDisplay.isNotBlank()) append(" · ${match.periodDisplay}")
+            if (match.minuteDisplay.isNotBlank()) append(" (${match.minuteDisplay})")
+            append(" — ${match.homeName} ${match.homeScore ?: 0} : ${match.awayScore ?: 0} ${match.awayName}")
+        }
+        MatchStatus.FINISHED -> "${match.homeName} ${match.homeScore ?: "-"} : ${match.awayScore ?: "-"} ${match.awayName} · Finalizado"
+        MatchStatus.POSTPONED -> "${match.homeName} vs ${match.awayName} · Postergado"
+        MatchStatus.CANCELLED -> "${match.homeName} vs ${match.awayName} · Cancelado"
+        MatchStatus.SCHEDULED -> "${match.homeName} vs ${match.awayName} · Programado (${RugbyDateUtils.formatLocalKickoff(match.timestampSec, match.dateArg)})"
+    }
+
+    GlassCard(highlightAccent = match.status == MatchStatus.LIVE) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Cobertura en vivo y noticias del evento",
+                style = MaterialTheme.typography.titleMedium,
+                color = if (match.status == MatchStatus.LIVE) PitchGreen else MetallicGold
+            )
+            if (match.status == MatchStatus.LIVE) {
+                PulsingLiveIndicator(label = "MINUTO A MINUTO")
+            }
+        }
+        Spacer(Modifier.height(Spacing.sm))
+        Text(
+            text = statusHeadline,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+
+        if (match.events.isNotEmpty()) {
+            Spacer(Modifier.height(Spacing.sm))
+            val latestEvents = match.events.sortedByDescending { it.minute }.take(5)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                latestEvents.forEach { ev ->
+                    val sideTeam = if (ev.teamSide == "away") match.awayName else match.homeName
+                    Text(
+                        text = "• ${ev.minute}' · ${ev.type.label} ($sideTeam)${if (ev.player.isNotBlank()) " — ${ev.player}" else ""}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        } else if (match.status == MatchStatus.LIVE) {
+            Spacer(Modifier.height(Spacing.xs))
+            Text(
+                text = "Esperando incidencias detalladas del encuentro. La app actualiza automáticamente cada 15 segundos.",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        if (relatedNews.isNotEmpty()) {
+            Spacer(Modifier.height(Spacing.md))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+            Spacer(Modifier.height(Spacing.sm))
+            Text(
+                text = "Noticias del torneo y protagonistas",
+                style = MaterialTheme.typography.labelLarge,
+                color = MetallicGold,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(Spacing.xs))
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                relatedNews.forEach { art ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                            .clickable(enabled = art.url.isNotBlank()) {
+                                runCatching { uriHandler.openUri(art.url) }
+                            }
+                            .padding(Spacing.sm)
+                    ) {
+                        Text(
+                            text = art.title,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (art.publishedLabel.isNotBlank()) {
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = art.publishedLabel,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = ElectricCyan
+                            )
+                        }
                     }
                 }
             }

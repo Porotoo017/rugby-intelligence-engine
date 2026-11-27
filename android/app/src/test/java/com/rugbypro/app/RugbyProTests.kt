@@ -286,4 +286,103 @@ class RugbyProTests {
         assertTrue(det.homeLineup.first().captain)
         assertEquals("Antoine Dupont", det.awayLineup.first().name)
     }
+
+    @Test
+    fun `world rugby live parser handles L1 L2 LHT and sevens group cleanly`() {
+        val nowMs = System.currentTimeMillis()
+        val json = """
+            {
+              "content": [
+                {
+                  "matchId": "live-7s-1",
+                  "status": "L2",
+                  "sport": "wrs",
+                  "clock": {"secs": 661, "label": "11:01"},
+                  "scores": [24, 5],
+                  "time": {"millis": $nowMs},
+                  "events": [{"label": "Women's Sevens Series 2027", "sport": "wrs"}],
+                  "venue": {"name": "The Sevens Stadium", "city": "Dubai"},
+                  "teams": [
+                    {"name": "Samoa 7s", "abbreviation": "SAM"},
+                    {"name": "Mexico 7s", "abbreviation": "MEX"}
+                  ]
+                }
+              ]
+            }
+        """.trimIndent()
+        val list = RugbyJsonParser.parseWorldRugbyLive(json)
+        assertEquals(1, list.size)
+        val m = list.first()
+        assertEquals(MatchStatus.LIVE, m.status)
+        assertEquals("sevens", m.group)
+        assertEquals(24, m.homeScore)
+        assertEquals(5, m.awayScore)
+        assertEquals("11:01", m.minuteDisplay)
+        assertEquals("2do Tiempo", m.periodDisplay)
+    }
+
+    @Test
+    fun `world rugby summary timeline and stats merge player names and 7s starters`() {
+        val summaryJson = """
+            {
+              "match": {"status": "L2", "sport": "wrs", "competition": "Women's Sevens Series 2027", "scores": [24, 5], "clock": {"secs": 700, "label": "11:40"}},
+              "officials": [{"position": "Referee", "official": {"name": {"display": "Doriane Constanty"}}}],
+              "teams": [
+                {"teamList": {"captainIds": ["p1"], "list": [
+                  {"number": "4", "positionLabel": "Centre", "position": "C", "player": {"id": "p1", "name": {"display": "Precyous Tuifua"}, "isReplacement": false}},
+                  {"number": "9", "positionLabel": "Replacement", "position": "Rep", "player": {"id": "p2", "name": {"display": "Sub Player"}, "isReplacement": true}}
+                ]}},
+                {"teamList": {"captainIds": [], "list": []}}
+              ]
+            }
+        """.trimIndent()
+        val timelineJson = """
+            {
+              "timeline": [
+                {"phase": "L1", "time": {"secs": 90, "label": "01:30"}, "type": "T5", "typeLabel": "Try", "playerId": "p1", "teamIndex": 0}
+              ]
+            }
+        """.trimIndent()
+        val statsJson = """
+            {
+              "teamStats": [
+                {"stats": {"Tries": 4.0, "Conversions": 2.0, "Possession": 0.58}},
+                {"stats": {"Tries": 1.0, "Conversions": 0.0, "Possession": 0.42}}
+              ]
+            }
+        """.trimIndent()
+        val det = RugbyJsonParser.parseWorldRugbyMatchDetail(summaryJson, timelineJson, statsJson, isSevensHint = true)
+        assertEquals(MatchStatus.LIVE, det.updatedStatus)
+        assertEquals(24, det.updatedHomeScore)
+        assertEquals(5, det.updatedAwayScore)
+        assertEquals("Precyous Tuifua", det.events.first().player)
+        assertEquals(MatchEventType.TRY, det.events.first().type)
+        assertEquals(1, det.events.first().minute)
+        assertTrue(det.homeLineup.first { it.jersey == "4" }.starter)
+        assertTrue(!det.homeLineup.first { it.jersey == "9" }.starter)
+        assertEquals(4, det.liveStats?.triesHome)
+        assertEquals(58, det.liveStats?.possessionHomePct)
+    }
+
+    @Test
+    fun `world rugby content news parser extracts svns articles`() {
+        val json = """
+            {
+              "content": [
+                {
+                  "id": "1049816",
+                  "title": "Dubai SVNS Day 1 Live",
+                  "description": "Samoa 7s and Mexico 7s open the tournament in Dubai",
+                  "canonicalUrl": "http://www.worldrugby.org/news/1049816",
+                  "date": "2026-11-27T08:00:00Z",
+                  "tags": [{"label": "DXB-SVNS"}]
+                }
+              ]
+            }
+        """.trimIndent()
+        val news = RugbyJsonParser.parseWorldRugbyContentNews(json, "en")
+        assertEquals(1, news.size)
+        assertEquals("Seven / SVNS", news.first().category)
+        assertTrue(news.first().url.startsWith("https://"))
+    }
 }

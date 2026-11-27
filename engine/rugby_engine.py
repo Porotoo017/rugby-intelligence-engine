@@ -925,10 +925,21 @@ def parse_world_rugby_matches(now_utc: dt.datetime) -> list[dict]:
             group = classify_group(ev_label, sport)
 
             wr_status = str(m.get("status") or "U").upper()
-            status = "finished" if wr_status == "C" else ("live" if wr_status in ("L", "1H", "2H", "HT", "ET") else "scheduled")
+            if wr_status in ("C", "LFT", "FT"):
+                status = "finished"
+            elif wr_status in ("L", "L1", "L2", "LHT", "LET", "L1ET", "L2ET", "LSO", "1H", "2H", "HT", "ET") or (wr_status.startswith("L") and wr_status != "LFT"):
+                status = "live"
+            elif wr_status in ("P", "PPD"):
+                status = "postponed"
+            elif wr_status in ("X", "CAN"):
+                status = "cancelled"
+            else:
+                status = "scheduled"
 
             t_obj = m.get("time") or {}
             utc_dt = parse_iso_dt(t_obj.get("millis")) or parse_iso_dt(t_obj.get("label"))
+            if status == "live" and utc_dt and utc_dt < (now_utc - dt.timedelta(hours=6)):
+                status = "finished"
             if status == "finished" and utc_dt and utc_dt > (now_utc + dt.timedelta(minutes=10)):
                 status = "scheduled"
             if status == "scheduled" and utc_dt and utc_dt < (now_utc - dt.timedelta(hours=18)):
@@ -938,7 +949,18 @@ def parse_world_rugby_matches(now_utc: dt.datetime) -> list[dict]:
             scores = m.get("scores") or [0, 0]
             ven = m.get("venue") or {}
             clk = (m.get("clock") or {}).get("label") or ""
-            status_text = clk if (status == "live" and clk) else ("Finalizado" if status == "finished" else "Programado")
+            period_map = {"L1": "1er Tiempo", "1H": "1er Tiempo", "L2": "2do Tiempo", "2H": "2do Tiempo", "LHT": "Entretiempo", "HT": "Entretiempo", "LET": "Tiempo extra", "L1ET": "Tiempo extra", "L2ET": "Tiempo extra", "ET": "Tiempo extra"}
+            if status == "live":
+                p_lbl = period_map.get(wr_status, "En vivo")
+                status_text = f"{p_lbl} · {clk}" if clk else p_lbl
+            elif status == "finished":
+                status_text = "Finalizado"
+            elif status == "postponed":
+                status_text = "Postergado"
+            elif status == "cancelled":
+                status_text = "Cancelado"
+            else:
+                status_text = "Programado"
             is_arg = ("argentina" in h_name.lower() or "argentina" in a_name.lower())
 
             out.append({
@@ -1046,13 +1068,16 @@ def enrich_match_details(matches: list[dict], conn: sqlite3.Connection) -> None:
     def fetch_detail(m: dict):
         if m["source"] == "wr":
             sm = fetch_json(f"https://api.wr-rims-prod.pulselive.com/rugby/v3/match/{m['eventId']}/summary", timeout=10)
-            return m, "wr", sm
+            tl = fetch_json(f"https://api.wr-rims-prod.pulselive.com/rugby/v3/match/{m['eventId']}/timeline", timeout=10)
+            st = fetch_json(f"https://api.wr-rims-prod.pulselive.com/rugby/v3/match/{m['eventId']}/stats", timeout=10)
+            return m, "wr", (sm, tl, st)
         else:
             sm = fetch_json(f"https://site.api.espn.com/apis/site/v2/sports/rugby/{m['leagueId']}/summary?event={m['eventId']}", timeout=10)
-            return m, "espn", sm
+            return m, "espn", (sm, None, None)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
-        for m, src, sm in ex.map(fetch_detail, priority):
+        for m, src, bundle in ex.map(fetch_detail, priority):
+            sm, tl_raw, st_raw = bundle
             if not isinstance(sm, dict):
                 continue
             if src == "wr":
@@ -1127,6 +1152,75 @@ def enrich_match_details(matches: list[dict], conn: sqlite3.Connection) -> None:
                             pl_name = ((item.get("player") or {}).get("name") or {}).get("display") or ""
                             min_lbl = (item.get("time") or {}).get("label") or ""
                             m["cards"].append({"team": side_key, "type": clabel, "player": pl_name, "minute": min_lbl})
+                if isinstance(tl_raw, dict) and isinstance(tl_raw.get("timeline"), list):
+                    p_lookup = {}
+                    for idx_p in range(min(2, len(teams_arr))):
+                        for ent_p in ((teams_arr[idx_p].get("teamList") or {}).get("list") or []):
+                            pl_p = ent_p.get("player") or {}
+                            nm_p = (pl_p.get("name") or {}).get("display") or ""
+                            if nm_p:
+                                for k_id in (pl_p.get("id"), pl_p.get("altId")):
+                                    if k_id:
+                                        p_lookup[str(k_id)] = nm_p
+                    tl_scoring = []
+                    tl_cards = []
+                    for ev in tl_raw.get("timeline") or []:
+                        t_code = str(ev.get("type") or "")
+                        t_lbl = str(ev.get("typeLabel") or "")
+                        t_low = (t_code + " " + t_lbl).lower()
+                        if t_code == "MS" or "change match status" in t_low:
+                            continue
+                        t_idx = ev.get("teamIndex")
+                        s_key = "home" if t_idx == 0 else ("away" if t_idx == 1 else "home")
+                        team_nm = m[s_key]["name"]
+                        pid = str(ev.get("playerId") or ev.get("playerAltId") or "")
+                        pl_name = p_lookup.get(pid, "")
+                        min_lbl = (ev.get("time") or {}).get("label") or ""
+                        if not min_lbl and (ev.get("time") or {}).get("secs") is not None:
+                            min_lbl = f"{int(ev['time']['secs']) // 60}'"
+                        if "yellow" in t_low or t_code == "YC":
+                            tl_cards.append({"team": s_key, "type": "Amarilla", "player": pl_name, "minute": min_lbl})
+                        elif "red" in t_low or t_code == "RC":
+                            tl_cards.append({"team": s_key, "type": "Roja", "player": pl_name, "minute": min_lbl})
+                        elif "miss" in t_low:
+                            continue
+                        elif "try" in t_low or t_code == "T5":
+                            tl_scoring.append({"team": s_key, "teamName": team_nm, "type": "Try", "player": pl_name, "minute": min_lbl})
+                        elif "conv" in t_low or t_code == "C2":
+                            tl_scoring.append({"team": s_key, "teamName": team_nm, "type": "Conv", "player": pl_name, "minute": min_lbl})
+                        elif "pen" in t_low or t_code == "P3":
+                            tl_scoring.append({"team": s_key, "teamName": team_nm, "type": "Penal", "player": pl_name, "minute": min_lbl})
+                        elif "drop" in t_low or t_code.startswith("DG"):
+                            tl_scoring.append({"team": s_key, "teamName": team_nm, "type": "Drop", "player": pl_name, "minute": min_lbl})
+                    if tl_scoring and not m["scoring"]:
+                        m["scoring"] = tl_scoring
+                    if tl_cards and not m["cards"]:
+                        m["cards"] = tl_cards
+                if isinstance(st_raw, dict) and isinstance(st_raw.get("teamStats"), list) and len(st_raw["teamStats"]) >= 2:
+                    s0 = (st_raw["teamStats"][0].get("stats") or {})
+                    s1 = (st_raw["teamStats"][1].get("stats") or {})
+                    def pct_val(d, k):
+                        v = d.get(k)
+                        if v is None: return None
+                        fv = float(v)
+                        return round(fv * 100) if fv <= 1.0 else round(fv)
+                    def int_val(d, k):
+                        v = d.get(k)
+                        return int(round(float(v))) if v is not None else None
+                    m["stats"] = {
+                        "possessionHome": pct_val(s0, "Possession"),
+                        "possessionAway": pct_val(s1, "Possession"),
+                        "territoryHome": pct_val(s0, "Territory"),
+                        "territoryAway": pct_val(s1, "Territory"),
+                        "tacklesHome": int_val(s0, "Tackles"),
+                        "tacklesAway": int_val(s1, "Tackles"),
+                        "triesHome": int_val(s0, "Tries"),
+                        "triesAway": int_val(s1, "Tries"),
+                        "conversionsHome": int_val(s0, "Conversions"),
+                        "conversionsAway": int_val(s1, "Conversions"),
+                        "penaltiesHome": int_val(s0, "PenaltiesConceded"),
+                        "penaltiesAway": int_val(s1, "PenaltiesConceded"),
+                    }
             else:
                 gi = sm.get("gameInfo") or {}
                 ven = gi.get("venue") or {}
@@ -1752,8 +1846,8 @@ def fetch_rugby_news() -> list[dict]:
                 out.append(it)
         return out
 
-    def from_world_rugby_es():
-        data = fetch_json("https://api.wr-rims-prod.pulselive.com/content/worldrugby/text/es/?pageSize=18", timeout=14)
+    def from_world_rugby_lang(lang: str, limit: int = 22):
+        data = fetch_json(f"https://api.wr-rims-prod.pulselive.com/content/worldrugby/text/{lang}?pageSize={limit}", timeout=14)
         if not isinstance(data, dict):
             return []
         out = []
@@ -1761,14 +1855,16 @@ def fetch_rugby_news() -> list[dict]:
             lm = c.get("leadMedia") or {}
             img = c.get("imageUrl") or lm.get("imageUrl") or lm.get("url") or ""
             pdt = parse_iso_dt(c.get("date") or c.get("publishFrom"))
+            tags_txt = " ".join(str((tg or {}).get("label") or "") for tg in (c.get("tags") or []))
+            def_cat = "sevens" if any(k in tags_txt.lower() for k in ("svns", "sevens")) else "internacional"
             it = build_item(
-                f"WorldRugbyES:{c.get('id')}",
+                f"WorldRugby:{lang}:{c.get('id')}",
                 c.get("title") or "",
                 c.get("summary") or c.get("description") or c.get("subtitle") or "",
                 c.get("canonicalUrl") or f"https://www.world.rugby/news/{c.get('id')}",
                 img,
-                "World Rugby ES",
-                "internacional",
+                f"World Rugby {lang.upper()}",
+                def_cat,
                 pdt,
             )
             if it:
@@ -1824,7 +1920,8 @@ def fetch_rugby_news() -> list[dict]:
         futs = [
             ex.submit(from_wp, "https://uar.com.ar/wp-json/wp/v2/posts?per_page=12&_embed", "UAR Oficial", "pumas"),
             ex.submit(from_wp, "https://urba.org.ar/wp-json/wp/v2/posts?per_page=12&_embed", "URBA Oficial", "urba"),
-            ex.submit(from_world_rugby_es),
+            ex.submit(from_world_rugby_lang, "es", 22),
+            ex.submit(from_world_rugby_lang, "en", 20),
             ex.submit(from_rss, "https://www.cordobaxv.com.ar/feed/", "Córdoba XV", "pumas", 12),
             ex.submit(from_rss, "https://www.planetrugby.com/rss", "Planet Rugby", "internacional", 16),
             ex.submit(from_rss, "https://www.rugbyrama.fr/rss.xml", "Rugbyrama", "internacional", 18),

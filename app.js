@@ -124,6 +124,200 @@
     return parts.join(' · ');
   }
 
+  async function overlayLiveFeeds() {
+    if (!state.data) return;
+    try {
+      const now = Date.now();
+      const start = new Date(now - 2 * 86400000).toISOString().slice(0, 10);
+      const end = new Date(now + 7 * 86400000).toISOString().slice(0, 10);
+      const [wrRes, espnRes, newsEsRes, newsEnRes] = await Promise.all([
+        fetch(`https://api.wr-rims-prod.pulselive.com/rugby/v3/match?startDate=${start}&endDate=${end}&pageSize=100&sort=asc`).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch('https://site.api.espn.com/apis/site/v2/sports/rugby/scorepanel').then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch('https://api.wr-rims-prod.pulselive.com/content/worldrugby/text/es?pageSize=20').then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch('https://api.wr-rims-prod.pulselive.com/content/worldrugby/text/en?pageSize=20').then(r => r.ok ? r.json() : null).catch(() => null)
+      ]);
+      const fmtDate = (ms) => {
+        if (!ms) return { dateArg: '', dayArg: '', timeArg: '' };
+        const d = new Date(ms);
+        const parts = new Intl.DateTimeFormat('en-GB', {
+          timeZone: 'America/Argentina/Buenos_Aires',
+          day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false
+        }).formatToParts(d).reduce((a, p) => { a[p.type] = p.value; return a; }, {});
+        return {
+          dayArg: `${parts.day}/${parts.month}/${parts.year}`,
+          timeArg: `${parts.hour}:${parts.minute}`,
+          dateArg: `${parts.day}/${parts.month}/${parts.year} · ${parts.hour}:${parts.minute}`
+        };
+      };
+      const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '').replace(/rugby|club|7s/g, '').slice(0, 16);
+      const sig = (m) => {
+        const h = norm(m.home && m.home.name);
+        const a = norm(m.away && m.away.name);
+        const d = (m.dayArg || (m.dateArg || '').slice(0, 10));
+        const is7 = (m.group === 'sevens') || /7s|sevens|svns/i.test(`${m.leagueName || ''} ${(m.home && m.home.name) || ''}`);
+        return `${h}_vs_${a}_${d}${is7 ? '_7s' : ''}`;
+      };
+      const wrLive = [];
+      if (wrRes && Array.isArray(wrRes.content)) {
+        for (const m of wrRes.content) {
+          const tms = m.teams || [];
+          if (tms.length < 2) continue;
+          const stRaw = String(m.status || 'U').toUpperCase();
+          const millis = (m.time && m.time.millis) || 0;
+          let st = 'scheduled';
+          if (['C', 'LFT', 'FT'].includes(stRaw)) st = 'finished';
+          else if (stRaw.startsWith('L') || ['1H', '2H', 'HT', 'ET'].includes(stRaw)) st = (millis && (now - millis) > 6 * 3600000) ? 'finished' : 'live';
+          const evLabel = (m.events && m.events[0] && m.events[0].label) || m.competition || 'World Rugby';
+          const sport = String(m.sport || (m.events && m.events[0] && m.events[0].sport) || '').toLowerCase();
+          const is7s = ['mrs', 'wrs'].includes(sport) || /sevens|svns|7s/i.test(evLabel + ' ' + tms[0].name);
+          const tm = fmtDate(millis);
+          const sc = m.scores || [];
+          const clk = (m.clock && m.clock.label) || '';
+          const pMap = { L1: '1er Tiempo', L2: '2do Tiempo', LHT: 'Entretiempo', LET: 'Tiempo extra' };
+          wrLive.push({
+            id: `wr:${m.matchId}`,
+            source: 'wr',
+            eventId: String(m.matchId),
+            leagueId: sport || 'wr',
+            leagueName: evLabel,
+            leagueShort: evLabel.replace("Men's Sevens Series 2027", 'SVNS 7s M').replace("Women's Sevens Series 2027", 'SVNS 7s F'),
+            phase: String(m.eventPhase || '').replace(/Pool\s+Pool/g, 'Pool').trim(),
+            group: is7s ? 'sevens' : 'nations',
+            category: 'Selecciones',
+            status: st,
+            statusText: st === 'live' ? `${pMap[stRaw] || 'EN VIVO'}${clk ? ' · ' + clk : ''}` : (st === 'finished' ? 'Finalizado' : 'Programado'),
+            isArgentina: /argentina/i.test(tms[0].name + ' ' + tms[1].name),
+            venue: m.venue || {},
+            ts: Math.floor(millis / 1000),
+            ...tm,
+            home: { name: tms[0].name, abbr: tms[0].abbreviation || '', crestUrl: '', flagUrl: '', score: st === 'scheduled' ? null : (sc[0] ?? null), lineup: [] },
+            away: { name: tms[1].name, abbr: tms[1].abbreviation || '', crestUrl: '', flagUrl: '', score: st === 'scheduled' ? null : (sc[1] ?? null), lineup: [] },
+            scoring: [], cards: [], officials: []
+          });
+        }
+      }
+      const existing = state.data.matches || [];
+      const bySig = new Map();
+      for (const m of existing) bySig.set(sig(m), m);
+      for (const liveM of wrLive) {
+        const s = sig(liveM);
+        const prev = bySig.get(s);
+        if (prev) {
+          bySig.set(s, {
+            ...prev,
+            id: prev.id || liveM.id,
+            eventId: liveM.eventId || prev.eventId,
+            source: liveM.source || prev.source,
+            status: liveM.status,
+            statusText: liveM.statusText,
+            home: { ...prev.home, score: liveM.home.score ?? prev.home.score },
+            away: { ...prev.away, score: liveM.away.score ?? prev.away.score }
+          });
+        } else {
+          bySig.set(s, liveM);
+        }
+      }
+      const merged = Array.from(bySig.values());
+      state.data.matches = merged;
+      state.data.statusCounts = {
+        live: merged.filter(x => x.status === 'live').length,
+        scheduled: merged.filter(x => x.status === 'scheduled').length,
+        finished: merged.filter(x => x.status === 'finished').length
+      };
+      const liveNewsItems = [];
+      for (const [bundle, lang] of [[newsEsRes, 'ES'], [newsEnRes, 'EN']]) {
+        if (bundle && Array.isArray(bundle.content)) {
+          for (const c of bundle.content) {
+            if (!c.title) continue;
+            const dInfo = fmtDate(c.publishFrom || (c.date ? Date.parse(c.date) : 0));
+            liveNewsItems.push({
+              id: `wr_live_${lang}_${c.id}`,
+              title: c.title,
+              summary: c.description || c.subtitle || c.title,
+              source: `World Rugby ${lang}`,
+              url: (c.canonicalUrl || `https://www.world.rugby/news/${c.id}`).replace('http://', 'https://'),
+              imageUrl: c.imageUrl || (c.leadMedia && c.leadMedia.imageUrl) || '',
+              topicLabel: /svns|sevens|7s/i.test(c.title + ' ' + (c.description || '')) ? 'Seven / SVNS' : 'Internacional',
+              dateArg: dInfo.dateArg
+            });
+          }
+        }
+      }
+      if (liveNewsItems.length) {
+        const seenTitle = new Set();
+        const combined = [];
+        for (const n of [...liveNewsItems, ...(state.data.news || [])]) {
+          const tk = (n.title || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 60);
+          if (!tk || !seenTitle.has(tk)) {
+            if (tk) seenTitle.add(tk);
+            combined.push(n);
+          }
+        }
+        state.data.news = combined;
+      }
+      render();
+      if (state.sheetMatchId && !els.detailSheet.classList.contains('hidden')) {
+        openMatchSheet(state.sheetMatchId, state.sheetTab);
+      }
+    } catch (_) {}
+  }
+
+  async function enrichWebWrMatch(m) {
+    if (!m || !m.eventId || m.source !== 'wr') return;
+    try {
+      const base = `https://api.wr-rims-prod.pulselive.com/rugby/v3/match/${m.eventId}`;
+      const [sm, tl] = await Promise.all([
+        fetch(`${base}/summary`).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch(`${base}/timeline`).then(r => r.ok ? r.json() : null).catch(() => null)
+      ]);
+      const pMap = {};
+      if (sm) {
+        if (Array.isArray(sm.officials)) {
+          m.officials = sm.officials.map(o => ({
+            name: (o.official && o.official.name && o.official.name.display) || '',
+            role: o.position || 'Oficial',
+            country: (o.official && o.official.country) || ''
+          })).filter(o => o.name);
+        }
+        const tms = sm.teams || [];
+        ['home', 'away'].forEach((sk, idx) => {
+          const tb = tms[idx];
+          const tlObj = tb && tb.teamList;
+          if (tlObj && Array.isArray(tlObj.list) && tlObj.list.length) {
+            const caps = new Set((tlObj.captainIds || []).map(String));
+            m[sk].lineup = tlObj.list.map(e => {
+              const pl = e.player || {};
+              const nm = (pl.name && pl.name.display) || '';
+              if (pl.id) pMap[String(pl.id)] = nm;
+              if (pl.altId) pMap[String(pl.altId)] = nm;
+              return {
+                jersey: String(e.number || '-'),
+                name: nm,
+                position: e.positionLabel || '',
+                captain: caps.has(String(pl.id)) || caps.has(String(pl.altId)),
+                caps: pl.caps || null
+              };
+            }).filter(x => x.name);
+          }
+        });
+      }
+      if (tl && Array.isArray(tl.timeline)) {
+        const sc = [];
+        for (const ev of tl.timeline) {
+          const tc = String(ev.type || '');
+          const tlLbl = String(ev.typeLabel || '');
+          if (tc === 'MS' || /miss|change match/i.test(tc + ' ' + tlLbl)) continue;
+          const sk = ev.teamIndex === 1 ? 'away' : 'home';
+          const pid = String(ev.playerId || ev.playerAltId || '');
+          const minL = (ev.time && ev.time.label) || '';
+          const tp = /try|T5/i.test(tc + tlLbl) ? 'Try' : (/conv|C2/i.test(tc + tlLbl) ? 'Conv' : (/pen|P3/i.test(tc + tlLbl) ? 'Penal' : (/drop|DG/i.test(tc + tlLbl) ? 'Drop' : '')));
+          if (tp) sc.push({ team: sk, teamName: m[sk].name, type: tp, player: pMap[pid] || '', minute: minL });
+        }
+        if (sc.length) m.scoring = sc;
+      }
+    } catch (_) {}
+  }
+
   async function loadData(force = false) {
     if (force && els.refreshBtn) {
       els.refreshBtn.textContent = 'Actualizando...';
@@ -141,6 +335,7 @@
       }
       els.offlineBar.classList.add('hidden');
       render();
+      overlayLiveFeeds();
     } catch (err) {
       if (!state.data) {
         els.main.innerHTML = `<div class="empty-box">No se pudieron cargar los datos de rugby (${esc(err.message)}). Revisá tu conexión y tocá Actualizar.</div>`;
@@ -1094,6 +1289,10 @@
       }
     }
     if (!m) return;
+    if (m.source === 'wr' && !m._liveEnriched) {
+      m._liveEnriched = true;
+      enrichWebWrMatch(m).then(() => { if (state.sheetMatchId === matchId && !els.detailSheet.classList.contains('hidden')) openMatchSheet(matchId, state.sheetTab); });
+    }
 
     const getTeamLineup = (tm) => {
       if (tm && tm.lineup && tm.lineup.length) return { list: tm.lineup, official: true };
@@ -1498,4 +1697,5 @@
   }
 
   loadData(false);
+  setInterval(() => { overlayLiveFeeds(); }, 20000);
 })();

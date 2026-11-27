@@ -17,6 +17,7 @@ import com.rugbypro.app.domain.model.TeamComparisonResult
 import com.rugbypro.app.domain.model.TeamProfile
 import com.rugbypro.app.domain.usecase.ComparePlayersUseCase
 import com.rugbypro.app.domain.usecase.CompareTeamsUseCase
+import com.rugbypro.app.domain.usecase.CrossVerifyMatchesUseCase
 import com.rugbypro.app.domain.usecase.FilterLiveAndTodayMatchesUseCase
 import com.rugbypro.app.domain.usecase.FilterMatchesUseCase
 import com.rugbypro.app.domain.usecase.SearchTeamsAndPlayersUseCase
@@ -142,9 +143,16 @@ class RugbyViewModel(app: Application) : AndroidViewModel(app) {
                 ComparePlayersUseCase.execute(pA.teamName, pA.teamFlagUrl, pA.player, pB.teamName, pB.teamFlagUrl, pB.player)
             } else null
 
+            val refreshedSelectedMatch = cur.selectedMatchDetail?.let { sel ->
+                val sig = CrossVerifyMatchesUseCase.matchSignature(sel)
+                dash.matches.firstOrNull { it.id == sel.id }
+                    ?: dash.matches.firstOrNull { CrossVerifyMatchesUseCase.matchSignature(it) == sig }
+                    ?: sel
+            }
             cur.copy(
                 isLoading = isLoading,
                 dashboard = dash,
+                selectedMatchDetail = refreshedSelectedMatch,
                 selectedStandingId = standingId,
                 compareTeamA = teamA,
                 compareTeamB = teamB,
@@ -286,6 +294,27 @@ class RugbyViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openMatchDetail(match: RugbyMatch?) {
         _uiState.update { it.copy(selectedMatchDetail = match) }
+        if (match != null) {
+            viewModelScope.launch {
+                val fresh = runCatching { repository.refreshMatchDetail(match) }.getOrNull() ?: return@launch
+                _uiState.update { cur ->
+                    val currentSel = cur.selectedMatchDetail
+                    val sameOpen = currentSel != null && (currentSel.id == match.id ||
+                        CrossVerifyMatchesUseCase.matchSignature(currentSel) == CrossVerifyMatchesUseCase.matchSignature(match))
+                    val updatedDash = cur.dashboard?.let { d ->
+                        d.copy(
+                            matches = d.matches.map { existing ->
+                                if (existing.id == fresh.id || existing.id == match.id) fresh else existing
+                            }
+                        )
+                    }
+                    cur.copy(
+                        dashboard = updatedDash ?: cur.dashboard,
+                        selectedMatchDetail = if (sameOpen) fresh else currentSel
+                    )
+                }
+            }
+        }
     }
 
     fun setCompareMode(mode: String) {

@@ -35,7 +35,13 @@ object CrossVerifyMatchesUseCase {
         val h = normalizeTeam(match.homeName)
         val a = normalizeTeam(match.awayName)
         val day = match.dateArg.take(10).ifBlank { match.dayArg.take(10) }
-        return "${h}_vs_${a}_$day"
+        val is7s = match.group.equals("sevens", true) ||
+            match.homeName.contains("7s", true) ||
+            match.awayName.contains("7s", true) ||
+            match.leagueName.contains("sevens", true) ||
+            match.leagueName.contains("svns", true)
+        val tag = if (is7s) "_7s" else ""
+        return "${h}_vs_${a}_$day$tag"
     }
 
     /**
@@ -65,6 +71,8 @@ object CrossVerifyMatchesUseCase {
                 val verified = scoresAgree && statusAgrees && sources.size >= 2
                 merged.add(
                     m.copy(
+                        id = if (m.id.startsWith("wr:") && peer.id.startsWith("wr_")) peer.id else m.id,
+                        group = if (peer.group == "sevens" || m.group == "sevens") "sevens" else m.group,
                         status = if (peer.status == MatchStatus.LIVE || peer.status == MatchStatus.FINISHED) peer.status else m.status,
                         homeScore = peer.homeScore ?: m.homeScore,
                         awayScore = peer.awayScore ?: m.awayScore,
@@ -99,6 +107,7 @@ object CrossVerifyMatchesUseCase {
         for (extra in secondary) {
             val sig = matchSignature(extra)
             if (sig !in seenSigs) {
+                seenSigs.add(sig)
                 merged.add(extra.copy(verificationStatus = VerificationStatus.PENDING_VERIFICATION))
             }
         }

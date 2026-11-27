@@ -339,6 +339,7 @@ fun RugbyProRoot(
         state.selectedMatchDetail?.let { match ->
             MatchDetailDialog(
                 match = match,
+                news = state.dashboard?.news.orEmpty(),
                 onDismiss = { viewModel.openMatchDetail(null) },
                 onSelectPlayer = { isHome, player -> viewModel.openPlayerFromMatch(match, isHome, player) }
             )

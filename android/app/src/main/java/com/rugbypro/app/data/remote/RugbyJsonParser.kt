@@ -264,10 +264,10 @@ object RugbyJsonParser {
             val resolved = ResolveMatchKitsUseCase.resolveForMatch(hTeam, aTeam)
             m.copy(
                 homeCrestUrl = m.homeCrestUrl.ifBlank { hTeam?.crestUrl.orEmpty() },
-                homeFlagUrl = m.homeFlagUrl.ifBlank { hTeam?.flagUrl.orEmpty() },
+                homeFlagUrl = m.homeFlagUrl.ifBlank { hTeam?.flagUrl.orEmpty() }.ifBlank { countryFlagUrl(m.homeName) },
                 homeCoach = m.homeCoach.ifBlank { hTeam?.coach.orEmpty() },
                 awayCrestUrl = m.awayCrestUrl.ifBlank { aTeam?.crestUrl.orEmpty() },
-                awayFlagUrl = m.awayFlagUrl.ifBlank { aTeam?.flagUrl.orEmpty() },
+                awayFlagUrl = m.awayFlagUrl.ifBlank { aTeam?.flagUrl.orEmpty() }.ifBlank { countryFlagUrl(m.awayName) },
                 awayCoach = m.awayCoach.ifBlank { aTeam?.coach.orEmpty() },
                 homeKit = resolved.homeKit,
                 awayKit = resolved.awayKit,
@@ -699,6 +699,94 @@ object RugbyJsonParser {
         return out
     }
 
+    private fun countryFlagUrl(teamName: String): String {
+        val low = teamName.lowercase().replace(" 7s", "").trim()
+        val iso = when {
+            "argentina" in low || "pumas" in low -> "ar"
+            "samoa" in low -> "ws"
+            "mexico" in low || "méxico" in low -> "mx"
+            "colombia" in low -> "co"
+            "poland" in low || "polonia" in low -> "pl"
+            "chile" in low -> "cl"
+            "uruguay" in low -> "uy"
+            "brasil" in low || "brazil" in low -> "br"
+            "paraguay" in low -> "py"
+            "new zealand" in low || "all blacks" in low -> "nz"
+            "south africa" in low || "springboks" in low -> "za"
+            "australia" in low || "wallabies" in low -> "au"
+            "fiji" in low -> "fj"
+            "tonga" in low -> "to"
+            "france" in low || "francia" in low -> "fr"
+            "england" in low || "inglaterra" in low -> "gb-eng"
+            "ireland" in low || "irlanda" in low -> "ie"
+            "scotland" in low || "escocia" in low -> "gb-sct"
+            "wales" in low || "gales" in low -> "gb-wls"
+            "italy" in low || "italia" in low -> "it"
+            "spain" in low || "españa" in low -> "es"
+            "portugal" in low -> "pt"
+            "georgia" in low -> "ge"
+            "japan" in low || "japón" in low -> "jp"
+            "china" in low && "hong kong" !in low -> "cn"
+            "hong kong" in low -> "hk"
+            "usa" in low || "united states" in low -> "us"
+            "canada" in low || "canadá" in low -> "ca"
+            "kenya" in low -> "ke"
+            "uganda" in low -> "ug"
+            "zimbabwe" in low -> "zw"
+            "germany" in low || "alemania" in low -> "de"
+            "belgium" in low -> "be"
+            "romania" in low -> "ro"
+            "namibia" in low -> "na"
+            else -> ""
+        }
+        return if (iso.isNotBlank()) "https://flagcdn.com/w80/$iso.png" else ""
+    }
+
+    private fun mapWorldRugbyStatus(stRaw: String, millis: Long): Pair<MatchStatus, String> {
+        val code = stRaw.trim().uppercase()
+        val nowMs = System.currentTimeMillis()
+        var status = when {
+            code in setOf("C", "LFT", "FT") -> MatchStatus.FINISHED
+            code in setOf("P", "PPD") -> MatchStatus.POSTPONED
+            code in setOf("X", "CAN") -> MatchStatus.CANCELLED
+            code in setOf("L", "L1", "L2", "LHT", "LET", "L1ET", "L2ET", "LSO", "1H", "2H", "HT", "ET") ||
+                (code.startsWith("L") && code != "LFT") -> MatchStatus.LIVE
+            else -> MatchStatus.SCHEDULED
+        }
+        if (status == MatchStatus.LIVE && millis > 0L && (nowMs - millis) > 6 * 3600_000L) {
+            status = MatchStatus.FINISHED
+        }
+        if (status == MatchStatus.FINISHED && millis > 0L && millis > (nowMs + 10 * 60_000L)) {
+            status = MatchStatus.SCHEDULED
+        }
+        val periodLabel = when {
+            status == MatchStatus.FINISHED -> "Final"
+            status == MatchStatus.POSTPONED -> "Postergado"
+            status == MatchStatus.CANCELLED -> "Cancelado"
+            code in setOf("L1", "1H") -> "1er Tiempo"
+            code in setOf("L2", "2H") -> "2do Tiempo"
+            code in setOf("LHT", "HT") -> "Entretiempo"
+            code in setOf("LET", "L1ET", "L2ET", "ET") -> "Tiempo extra"
+            status == MatchStatus.LIVE -> "En vivo"
+            else -> status.label
+        }
+        return status to periodLabel
+    }
+
+    fun parseEspnScorepanel(jsonStr: String): List<RugbyMatch> {
+        val root = JSONObject(jsonStr)
+        val scoresArr = root.optJSONArray("scores") ?: return emptyList()
+        val out = mutableListOf<RugbyMatch>()
+        for (i in 0 until scoresArr.length()) {
+            val block = scoresArr.optJSONObject(i) ?: continue
+            val lg = block.optJSONArray("leagues")?.optJSONObject(0)
+            val lid = lg?.optString("id", "rugby") ?: "rugby"
+            val lName = lg?.optString("name", "Rugby Internacional") ?: "Rugby Internacional"
+            out.addAll(parseEspnScoreboard(block.toString(), lid, lName))
+        }
+        return out
+    }
+
     fun parseWorldRugbyMatches(jsonStr: String): List<RugbyMatch> = parseWorldRugbyLive(jsonStr)
 
     fun parseWorldRugbyLive(jsonStr: String): List<RugbyMatch> {
@@ -713,39 +801,61 @@ object RugbyJsonParser {
             val home = teams.optJSONObject(0) ?: continue
             val away = teams.optJSONObject(1) ?: continue
             val stRaw = m.optString("status", "U").uppercase()
-            val status = when (stRaw) {
-                "L" -> MatchStatus.LIVE
-                "C" -> MatchStatus.FINISHED
-                "P", "PPD" -> MatchStatus.POSTPONED
-                "X", "CAN" -> MatchStatus.CANCELLED
-                else -> MatchStatus.SCHEDULED
-            }
             val timeObj = m.optJSONObject("time")
             val millis = timeObj?.optLong("millis", 0L) ?: 0L
+            val (status, periodLabel) = mapWorldRugbyStatus(stRaw, millis)
             val zdt = if (millis > 0L) Instant.ofEpochMilli(millis).atZone(artZone) else null
             val hScore = if (status == MatchStatus.SCHEDULED || scores == null || scores.length() < 2) null else scores.optInt(0)
             val aScore = if (status == MatchStatus.SCHEDULED || scores == null || scores.length() < 2) null else scores.optInt(1)
-            val clockSecs = m.optJSONObject("clock")?.optInt("secs", -1) ?: -1
-            val clockDisp = if (clockSecs >= 0) "${clockSecs / 60}'" else ""
+            val clockObj = m.optJSONObject("clock")
+            val clockLabel = clockObj?.optString("label", "")?.trim().orEmpty()
+            val clockSecs = clockObj?.optInt("secs", -1) ?: -1
+            val clockDisp = when {
+                status != MatchStatus.LIVE -> ""
+                clockLabel.isNotBlank() && clockLabel != "00:00" -> clockLabel
+                clockSecs >= 0 -> "${clockSecs / 60}'"
+                else -> ""
+            }
             val hName = home.optString("name")
             val aName = away.optString("name")
             val isArg = hName.contains("Argentina", true) || aName.contains("Argentina", true)
             val venue = m.optJSONObject("venue")
-            val compName = m.optJSONArray("events")?.optJSONObject(0)?.optString("label", "Rugby Internacional") ?: "Rugby Internacional"
+            val evObj = m.optJSONArray("events")?.optJSONObject(0)
+            val compName = evObj?.optString("label", m.optString("competition", "Rugby Internacional"))
+                ?.ifBlank { "Rugby Internacional" } ?: "Rugby Internacional"
+            val sport = m.optString("sport", evObj?.optString("sport", "") ?: "").lowercase()
+            val isSevens = sport in setOf("mrs", "wrs") ||
+                compName.contains("sevens", true) ||
+                compName.contains("svns", true) ||
+                hName.contains("7s", true) ||
+                aName.contains("7s", true)
+            val group = when {
+                isSevens -> "sevens"
+                compName.contains("top 14", true) -> "top14"
+                compName.contains("premiership", true) -> "premiership"
+                compName.contains("united rugby", true) || compName.contains("urc", true) -> "urc"
+                compName.contains("super rugby", true) -> "super_rugby"
+                else -> "nations"
+            }
+            val shortComp = compName
+                .replace("Men's Sevens Series 2027", "SVNS 7s M")
+                .replace("Women's Sevens Series 2027", "SVNS 7s F")
+                .take(20)
+            val phase = m.optString("eventPhase", "").replace("Pool Pool", "Pool").trim()
 
             out.add(
                 RugbyMatch(
                     id = "wr_${m.optString("matchId")}",
                     source = "official_live",
-                    leagueId = "wr",
+                    leagueId = sport.ifBlank { "wr" },
                     leagueName = compName,
-                    leagueShort = compName.take(18),
-                    phase = "",
-                    group = "nations",
-                    category = "Selecciones",
+                    leagueShort = shortComp,
+                    phase = phase,
+                    group = group,
+                    category = if (group in setOf("sevens", "nations")) "Selecciones" else "Clubes",
                     status = status,
                     minuteDisplay = clockDisp,
-                    periodDisplay = if (status == MatchStatus.FINISHED) "Final" else status.label,
+                    periodDisplay = periodLabel,
                     dateArg = zdt?.let { argFmt.format(it) } ?: "",
                     dayArg = zdt?.let { dayFmt.format(it) } ?: "",
                     timeArg = zdt?.let { timeFmt.format(it) } ?: "",
@@ -755,14 +865,14 @@ object RugbyJsonParser {
                     homeName = hName,
                     homeAbbr = home.optString("abbreviation", hName.take(3).uppercase()),
                     homeCrestUrl = "",
-                    homeFlagUrl = "",
+                    homeFlagUrl = countryFlagUrl(hName),
                     homeCoach = "",
                     homeRank = null,
                     homeScore = hScore,
                     awayName = aName,
                     awayAbbr = away.optString("abbreviation", aName.take(3).uppercase()),
                     awayCrestUrl = "",
-                    awayFlagUrl = "",
+                    awayFlagUrl = countryFlagUrl(aName),
                     awayCoach = "",
                     awayRank = null,
                     awayScore = aScore,
@@ -770,7 +880,8 @@ object RugbyJsonParser {
                     verificationStatus = VerificationStatus.PENDING_VERIFICATION,
                     verifiedSources = listOf("official_live"),
                     events = emptyList(),
-                    liveStats = null
+                    liveStats = null,
+                    isExtraTime = stRaw in setOf("LET", "L1ET", "L2ET", "ET")
                 )
             )
         }
@@ -874,7 +985,12 @@ object RugbyJsonParser {
         val refereeName: String,
         val officials: List<MatchOfficial>,
         val homeLineup: List<PlayerProfile>,
-        val awayLineup: List<PlayerProfile>
+        val awayLineup: List<PlayerProfile>,
+        val updatedStatus: MatchStatus? = null,
+        val updatedPeriodDisplay: String? = null,
+        val updatedMinuteDisplay: String? = null,
+        val updatedHomeScore: Int? = null,
+        val updatedAwayScore: Int? = null
     )
 
     fun parseEspnSummaryFull(
@@ -931,12 +1047,25 @@ object RugbyJsonParser {
         return MatchLiveDetail(events, stats, refName, officials, homeLineup, awayLineup)
     }
 
-    fun parseWorldRugbyMatchDetail(jsonStr: String): MatchLiveDetail {
-        val root = JSONObject(jsonStr)
+    fun parseWorldRugbyMatchDetail(
+        summaryJson: String,
+        timelineJson: String? = null,
+        statsJson: String? = null,
+        isSevensHint: Boolean = false
+    ): MatchLiveDetail {
+        val root = JSONObject(summaryJson)
+        val matchObj = root.optJSONObject("match")
+        val sportStr = (matchObj?.optString("sport", "") ?: root.optString("sport", "")).lowercase()
+        val compStr = (matchObj?.optString("competition", "") ?: "").lowercase()
+        val isSevens = isSevensHint || sportStr in setOf("mrs", "wrs") || "sevens" in compStr || "svns" in compStr
+        val maxStarters = if (isSevens) 7 else 15
+
         val (refName, officials) = parseMatchOfficials(root.optJSONArray("officials"))
         val teamsArr = root.optJSONArray("teams") ?: JSONArray()
         val lineups = arrayOf(emptyList<PlayerProfile>(), emptyList<PlayerProfile>())
         val events = mutableListOf<MatchEvent>()
+        val playerById = mutableMapOf<String, String>()
+
         for (idx in 0 until minOf(2, teamsArr.length())) {
             val tb = teamsArr.optJSONObject(idx) ?: continue
             val tl = tb.optJSONObject("teamList")
@@ -950,9 +1079,13 @@ object RugbyJsonParser {
                 val pname = pl.optJSONObject("name")?.optString("display", "")?.trim().orEmpty()
                 if (pname.isBlank()) continue
                 val pid = pl.optString("id", "")
+                val pAltId = pl.optString("altId", "")
+                if (pid.isNotBlank()) playerById[pid] = pname
+                if (pAltId.isNotBlank()) playerById[pAltId] = pname
                 val num = ent.optString("number", "-")
                 val numInt = num.toIntOrNull() ?: 99
-                val isSub = pl.optBoolean("isReplacement", false) || numInt > 15
+                val isSub = pl.optBoolean("isReplacement", false) || numInt > maxStarters
+                val country = if (pl.isNull("country")) null else pl.optString("country").takeIf { it.isNotBlank() }
                 parsed.add(
                     PlayerProfile(
                         jersey = num,
@@ -960,11 +1093,13 @@ object RugbyJsonParser {
                         position = ent.optString("positionLabel", ""),
                         posCode = ent.optString("position", ""),
                         starter = !isSub,
-                        captain = pid in caps,
+                        captain = pid in caps || pAltId in caps,
                         age = pl.optJSONObject("age")?.let { if (it.isNull("years")) null else it.optInt("years") },
-                        height = if (pl.isNull("height")) null else pl.optString("height").takeIf { it.isNotBlank() && it != "null" },
-                        weight = if (pl.isNull("weight")) null else pl.optString("weight").takeIf { it.isNotBlank() && it != "null" },
-                        caps = if (pl.isNull("caps")) null else pl.optInt("caps")
+                        height = if (pl.isNull("height")) null else pl.optString("height").takeIf { it.isNotBlank() && it != "null" && it != "0" },
+                        weight = if (pl.isNull("weight")) null else pl.optString("weight").takeIf { it.isNotBlank() && it != "null" && it != "0" },
+                        caps = if (pl.isNull("caps")) null else pl.optInt("caps"),
+                        nationality = country,
+                        nationalityFlagUrl = country?.let { countryFlagUrl(it) }?.takeIf { it.isNotBlank() }
                     )
                 )
             }
@@ -985,12 +1120,12 @@ object RugbyJsonParser {
                         val item = arr.optJSONObject(eIdx) ?: continue
                         val pName = item.optJSONObject("player")?.optJSONObject("name")?.optString("display", "").orEmpty()
                         val minStr = item.optJSONObject("time")?.optString("label", "0") ?: "0"
-                        val minInt = minStr.replace("'", "").trim().toIntOrNull() ?: 0
+                        val minInt = minStr.replace("'", "").substringBefore(":").trim().toIntOrNull() ?: 0
                         events.add(
                             MatchEvent(
                                 id = "wr_${sideKey}_${k}_$eIdx",
                                 minute = minInt,
-                                period = if (minInt <= 40) "1T" else "2T",
+                                period = if (minInt <= (if (isSevens) 7 else 40)) "1T" else "2T",
                                 type = evType,
                                 teamSide = sideKey,
                                 player = pName,
@@ -1001,13 +1136,275 @@ object RugbyJsonParser {
                 }
             }
         }
+
+        // Timeline minuto a minuto oficial (esencial para 7s y partidos en vivo)
+        if (!timelineJson.isNullOrBlank()) {
+            runCatching {
+                val tlRoot = JSONObject(timelineJson)
+                val tlArr = tlRoot.optJSONArray("timeline") ?: JSONArray()
+                val tlEvents = mutableListOf<MatchEvent>()
+                for (k in 0 until tlArr.length()) {
+                    val ev = tlArr.optJSONObject(k) ?: continue
+                    val tCode = ev.optString("type", "")
+                    val tLabel = ev.optString("typeLabel", "")
+                    val combined = "$tCode $tLabel".lowercase()
+                    if (tCode == "MS" || "change match status" in combined) continue
+                    val evType = when {
+                        "yellow" in combined || tCode == "YC" -> MatchEventType.YELLOW_CARD
+                        "red" in combined || tCode == "RC" -> MatchEventType.RED_CARD
+                        "sub" in combined || "replacement" in combined -> MatchEventType.SUBSTITUTION
+                        "try" in combined || tCode == "T5" -> MatchEventType.TRY
+                        "conv" in combined || tCode == "C2" -> MatchEventType.CONVERSION
+                        "pen" in combined || tCode == "P3" -> MatchEventType.PENALTY
+                        "drop" in combined || tCode.startsWith("DG") -> MatchEventType.DROP_GOAL
+                        else -> continue
+                    }
+                    val tObj = ev.optJSONObject("time")
+                    val secs = tObj?.optInt("secs", -1) ?: -1
+                    val lblTime = tObj?.optString("label", "").orEmpty()
+                    val minute = when {
+                        secs >= 0 -> secs / 60
+                        lblTime.contains(":") -> lblTime.substringBefore(":").toIntOrNull() ?: 0
+                        else -> lblTime.replace("'", "").trim().toIntOrNull() ?: 0
+                    }
+                    val phaseRaw = ev.optString("phase", "")
+                    val periodLbl = when {
+                        phaseRaw == "L1" || phaseRaw == "1H" -> "1T"
+                        phaseRaw == "L2" || phaseRaw == "2H" -> "2T"
+                        "ET" in phaseRaw -> "TE"
+                        else -> if (minute <= (if (isSevens) 7 else 40)) "1T" else "2T"
+                    }
+                    val teamIdx = ev.optInt("teamIndex", 0)
+                    val sideKey = if (teamIdx == 1) "away" else "home"
+                    val pid = ev.optString("playerId", "")
+                    val pAlt = ev.optString("playerAltId", "")
+                    val pName = playerById[pid] ?: playerById[pAlt] ?: ""
+                    val exactClock = lblTime.takeIf { it.isNotBlank() } ?: "${minute}'"
+                    val detailLabel = when {
+                        "miss" in combined && evType == MatchEventType.CONVERSION -> "Conversión fallada ($exactClock)"
+                        evType == MatchEventType.SUBSTITUTION && "off" in combined -> "Sale del campo ($exactClock)"
+                        evType == MatchEventType.SUBSTITUTION && "on" in combined -> "Ingresa al campo ($exactClock)"
+                        else -> "${evType.label} ($exactClock)"
+                    }
+                    tlEvents.add(
+                        MatchEvent(
+                            id = "wrtl_${k}_${tCode}_${minute}",
+                            minute = minute,
+                            period = periodLbl,
+                            type = evType,
+                            teamSide = sideKey,
+                            player = pName,
+                            detail = if (pName.isNotBlank()) "$detailLabel · $pName" else detailLabel
+                        )
+                    )
+                }
+                if (tlEvents.isNotEmpty()) {
+                    events.clear()
+                    events.addAll(tlEvents)
+                }
+            }
+        }
+
+        // Estadísticas en vivo oficiales (7s y 15s)
+        var parsedStats: LiveMatchStats? = null
+        if (!statsJson.isNullOrBlank()) {
+            runCatching {
+                val stRoot = JSONObject(statsJson)
+                val ts = stRoot.optJSONArray("teamStats")
+                if (ts != null && ts.length() >= 2) {
+                    val s0 = ts.optJSONObject(0)?.optJSONObject("stats")
+                    val s1 = ts.optJSONObject(1)?.optJSONObject("stats")
+                    fun pct(obj: JSONObject?, key: String): Int? {
+                        if (obj == null || !obj.has(key) || obj.isNull(key)) return null
+                        val v = obj.optDouble(key, Double.NaN)
+                        if (v.isNaN()) return null
+                        return if (v <= 1.0) kotlin.math.round(v * 100.0).toInt() else kotlin.math.round(v).toInt()
+                    }
+                    fun num(obj: JSONObject?, key: String): Int? {
+                        if (obj == null || !obj.has(key) || obj.isNull(key)) return null
+                        val v = obj.optDouble(key, Double.NaN)
+                        return if (v.isNaN()) null else kotlin.math.round(v).toInt()
+                    }
+                    val cand = LiveMatchStats(
+                        possessionHomePct = pct(s0, "Possession"),
+                        possessionAwayPct = pct(s1, "Possession"),
+                        territoryHomePct = pct(s0, "Territory"),
+                        territoryAwayPct = pct(s1, "Territory"),
+                        tacklesHome = num(s0, "Tackles"),
+                        tacklesAway = num(s1, "Tackles"),
+                        lineoutsWonHome = num(s0, "LineoutsWon"),
+                        lineoutsWonAway = num(s1, "LineoutsWon"),
+                        scrumsWonHome = num(s0, "ScrumsWon"),
+                        scrumsWonAway = num(s1, "ScrumsWon"),
+                        penaltiesHome = num(s0, "PenaltiesConceded"),
+                        penaltiesAway = num(s1, "PenaltiesConceded"),
+                        triesHome = num(s0, "Tries"),
+                        triesAway = num(s1, "Tries"),
+                        conversionsHome = num(s0, "Conversions"),
+                        conversionsAway = num(s1, "Conversions"),
+                        metresHome = num(s0, "Metres") ?: num(s0, "CarriesMetres"),
+                        metresAway = num(s1, "Metres") ?: num(s1, "CarriesMetres"),
+                        cleanBreaksHome = num(s0, "CleanBreaks"),
+                        cleanBreaksAway = num(s1, "CleanBreaks"),
+                        defendersBeatenHome = num(s0, "DefendersBeaten"),
+                        defendersBeatenAway = num(s1, "DefendersBeaten"),
+                        turnoversWonHome = num(s0, "TurnoversWon") ?: num(s0, "TurnoverWon"),
+                        turnoversWonAway = num(s1, "TurnoversWon") ?: num(s1, "TurnoverWon")
+                    )
+                    if (cand.hasAnyMetric()) parsedStats = cand
+                }
+            }
+        }
+
+        // Marcador y reloj frescos desde /summary.match
+        var upStatus: MatchStatus? = null
+        var upPeriod: String? = null
+        var upMinute: String? = null
+        var upHomeScore: Int? = null
+        var upAwayScore: Int? = null
+        if (matchObj != null) {
+            val stRaw = matchObj.optString("status", "U")
+            val millis = matchObj.optJSONObject("time")?.optLong("millis", 0L) ?: 0L
+            val (st, pLbl) = mapWorldRugbyStatus(stRaw, millis)
+            upStatus = st
+            upPeriod = pLbl
+            val clk = matchObj.optJSONObject("clock")
+            val clkLbl = clk?.optString("label", "")?.trim().orEmpty()
+            val clkSecs = clk?.optInt("secs", -1) ?: -1
+            upMinute = when {
+                st != MatchStatus.LIVE -> ""
+                clkLbl.isNotBlank() && clkLbl != "00:00" -> clkLbl
+                clkSecs >= 0 -> "${clkSecs / 60}'"
+                else -> ""
+            }
+            val scArr = matchObj.optJSONArray("scores")
+            if (st != MatchStatus.SCHEDULED && scArr != null && scArr.length() >= 2) {
+                upHomeScore = scArr.optInt(0)
+                upAwayScore = scArr.optInt(1)
+            }
+        }
+
         return MatchLiveDetail(
             events = events.sortedBy { it.minute },
-            liveStats = null,
+            liveStats = parsedStats,
             refereeName = refName,
             officials = officials,
             homeLineup = lineups[0],
-            awayLineup = lineups[1]
+            awayLineup = lineups[1],
+            updatedStatus = upStatus,
+            updatedPeriodDisplay = upPeriod,
+            updatedMinuteDisplay = upMinute,
+            updatedHomeScore = upHomeScore,
+            updatedAwayScore = upAwayScore
         )
+    }
+
+    fun parseWorldRugbyContentNews(jsonStr: String, lang: String = "es"): List<NewsArticle> {
+        val root = JSONObject(jsonStr)
+        val arr = root.optJSONArray("content") ?: return emptyList()
+        val out = mutableListOf<NewsArticle>()
+        for (i in 0 until arr.length()) {
+            val c = arr.optJSONObject(i) ?: continue
+            val title = c.optString("title", "").trim()
+            if (title.isBlank()) continue
+            val id = "wr_${lang}_${c.optString("id", title.hashCode().toString())}"
+            val rawSummary = c.optString("description", c.optString("summary", c.optString("subtitle", title)))
+                .replace(Regex("<[^>]+>"), " ")
+                .replace(Regex("\s+"), " ")
+                .trim()
+                .ifBlank { title }
+            val lm = c.optJSONObject("leadMedia")
+            val img = c.optString("imageUrl", "")
+                .ifBlank { lm?.optString("imageUrl", "") ?: "" }
+                .ifBlank { lm?.optString("onDemandUrl", "") ?: "" }
+            val url = c.optString("canonicalUrl", "")
+                .replace("http://", "https://")
+                .ifBlank { "https://www.world.rugby/news/${c.optString("id")}" }
+            val pubMillis = c.optLong("publishFrom", 0L)
+            val dateStr = c.optString("date", "")
+            val zdt = when {
+                pubMillis > 0L -> runCatching { Instant.ofEpochMilli(pubMillis).atZone(artZone) }.getOrNull()
+                dateStr.isNotBlank() -> runCatching { Instant.parse(dateStr).atZone(artZone) }.getOrNull()
+                else -> null
+            }
+            val tagsArr = c.optJSONArray("tags") ?: JSONArray()
+            val tagsText = buildString {
+                for (t in 0 until tagsArr.length()) {
+                    append(tagsArr.optJSONObject(t)?.optString("label", "") ?: "").append(' ')
+                }
+            }.lowercase()
+            val lowTitle = "$title $rawSummary $tagsText".lowercase()
+            val category = when {
+                "pumas" in lowTitle || "argentina" in lowTitle || "jaguares" in lowTitle -> "Los Pumas"
+                "svns" in lowTitle || "sevens" in lowTitle || "7s" in lowTitle -> "Seven / SVNS"
+                "six nations" in lowTitle || "nations championship" in lowTitle -> "Torneos"
+                else -> "Internacional"
+            }
+            out.add(
+                NewsArticle(
+                    id = id,
+                    title = title,
+                    summary = rawSummary.take(260),
+                    source = "World Rugby ${lang.uppercase()}",
+                    url = url,
+                    imageUrl = img,
+                    category = category,
+                    publishedLabel = zdt?.let { argFmt.format(it) } ?: RugbyDateUtils.normalizeDisplayDate(dateStr),
+                    savedOffline = false
+                )
+            )
+        }
+        return out
+    }
+
+    fun parseRssNews(xmlStr: String, sourceName: String, defaultCategory: String = "Internacional"): List<NewsArticle> {
+        val out = mutableListOf<NewsArticle>()
+        val itemRegex = Regex("<item\b[^>]*>(.*?)</item>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+        fun extractTag(block: String, tag: String): String {
+            val r = Regex("<$tag[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/$tag>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+            return r.find(block)?.groupValues?.getOrNull(1)
+                ?.replace(Regex("<[^>]+>"), " ")
+                ?.replace("&amp;", "&")
+                ?.replace("&quot;", """)
+                ?.replace("&#39;", "'")
+                ?.replace("&apos;", "'")
+                ?.replace(Regex("\s+"), " ")
+                ?.trim()
+                .orEmpty()
+        }
+        for ((idx, m) in itemRegex.findAll(xmlStr).withIndex()) {
+            if (idx >= 18) break
+            val block = m.groupValues[1]
+            val title = extractTag(block, "title")
+            if (title.isBlank()) continue
+            val link = extractTag(block, "link")
+            val desc = extractTag(block, "description").ifBlank { title }
+            val pubDate = extractTag(block, "pubDate")
+            val imgMatch = Regex("""(?:url|src)=["'](https?://[^"']+\.(?:jpg|jpeg|png|webp)[^"']*)["']""", RegexOption.IGNORE_CASE).find(block)
+            val imgUrl = imgMatch?.groupValues?.getOrNull(1).orEmpty()
+            val zdt = runCatching {
+                java.time.ZonedDateTime.parse(pubDate, DateTimeFormatter.RFC_1123_DATE_TIME).withZoneSameInstant(artZone)
+            }.getOrNull()
+            val low = "$title $desc".lowercase()
+            val cat = when {
+                "pumas" in low || "argentina" in low || "urba" in low -> "Los Pumas"
+                "sevens" in low || "svns" in low || "7s" in low -> "Seven / SVNS"
+                else -> defaultCategory
+            }
+            out.add(
+                NewsArticle(
+                    id = "rss_${sourceName.lowercase().replace(" ", "_")}_${title.hashCode()}",
+                    title = title,
+                    summary = desc.take(260),
+                    source = sourceName,
+                    url = link,
+                    imageUrl = imgUrl,
+                    category = cat,
+                    publishedLabel = zdt?.let { argFmt.format(it) } ?: RugbyDateUtils.normalizeDisplayDate(pubDate),
+                    savedOffline = false
+                )
+            )
+        }
+        return out
     }
 }

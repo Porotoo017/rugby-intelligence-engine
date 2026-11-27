@@ -120,11 +120,25 @@ data class LiveMatchStats(
     val scrumsWonHome: Int? = null,
     val scrumsWonAway: Int? = null,
     val penaltiesHome: Int? = null,
-    val penaltiesAway: Int? = null
+    val penaltiesAway: Int? = null,
+    val triesHome: Int? = null,
+    val triesAway: Int? = null,
+    val conversionsHome: Int? = null,
+    val conversionsAway: Int? = null,
+    val metresHome: Int? = null,
+    val metresAway: Int? = null,
+    val cleanBreaksHome: Int? = null,
+    val cleanBreaksAway: Int? = null,
+    val defendersBeatenHome: Int? = null,
+    val defendersBeatenAway: Int? = null,
+    val turnoversWonHome: Int? = null,
+    val turnoversWonAway: Int? = null
 ) {
     fun hasAnyMetric(): Boolean = listOf(
         possessionHomePct, territoryHomePct, tacklesHome,
-        lineoutsWonHome, scrumsWonHome, penaltiesHome
+        lineoutsWonHome, scrumsWonHome, penaltiesHome,
+        triesHome, conversionsHome, metresHome,
+        cleanBreaksHome, defendersBeatenHome, turnoversWonHome
     ).any { it != null }
 }
 

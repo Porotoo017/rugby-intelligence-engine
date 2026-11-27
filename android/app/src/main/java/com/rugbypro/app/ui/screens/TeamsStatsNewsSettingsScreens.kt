@@ -961,7 +961,7 @@ fun SettingsScreen(
                 Text("Frecuencia en Vivo", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.secondary)
                 Spacer(Modifier.height(Spacing.sm))
                 Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                    listOf(30, 60).forEach { sec ->
+                    listOf(15, 30, 60).forEach { sec ->
                         FilterChip(
                             selected = state.config.liveRefreshSec == sec,
                             onClick = { viewModel.updateConfig { it.copy(liveRefreshSec = sec) } },

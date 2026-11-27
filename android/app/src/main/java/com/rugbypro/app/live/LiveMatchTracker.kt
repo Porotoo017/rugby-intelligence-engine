@@ -2,6 +2,7 @@ package com.rugbypro.app.live
 
 import android.content.Context
 import com.rugbypro.app.domain.model.AppConfig
+import com.rugbypro.app.domain.model.MatchStatus
 import com.rugbypro.app.domain.model.RugbyDashboard
 import com.rugbypro.app.domain.repository.RugbyRepository
 import com.rugbypro.app.domain.usecase.DetectKeyLiveEventsUseCase
@@ -26,16 +27,23 @@ class LiveMatchTracker(
     ) {
         pollingJob?.cancel()
         pollingJob = scope.launch {
+            var tick = 0
             while (isActive) {
-                val intervalSec = getConfig().liveRefreshSec.coerceIn(30, 60)
+                val curMatches = getCurrentDashboard()?.matches.orEmpty()
+                val hasLiveOrPreMatch = curMatches.any {
+                    it.status == MatchStatus.LIVE || PreMatchWindowUseCase.isInsideThirtyMinuteWindow(it)
+                }
+                val baseSec = getConfig().liveRefreshSec.coerceIn(15, 60)
+                val intervalSec = if (hasLiveOrPreMatch) minOf(baseSec, 15) else baseSec
                 delay(intervalSec * 1000L)
+                tick++
                 runCatching {
                     val prevMatches = getCurrentDashboard()?.matches.orEmpty()
                     val cfg = getConfig()
                     val nowMs = System.currentTimeMillis()
                     val preMatchNow = prevMatches.firstOrNull { PreMatchWindowUseCase.isInsideThirtyMinuteWindow(it, nowMs) }
                     val nextDash = repository.syncWithCascade(
-                        forceLiveRefresh = preMatchNow != null,
+                        forceLiveRefresh = preMatchNow != null || tick % 6 == 0,
                         forcePreMatchId = preMatchNow?.id
                     )
                     val alerts = DetectKeyLiveEventsUseCase.execute(

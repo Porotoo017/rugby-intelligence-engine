@@ -53,6 +53,7 @@ import com.rugbypro.app.R
 import com.rugbypro.app.domain.model.ActiveKitRole
 import com.rugbypro.app.domain.model.AppSection
 import com.rugbypro.app.domain.model.MatchStatus
+import com.rugbypro.app.domain.model.NewsArticle
 import com.rugbypro.app.domain.model.PlayerProfile
 import com.rugbypro.app.domain.model.RugbyMatch
 import com.rugbypro.app.ui.RugbyUiState
@@ -62,6 +63,7 @@ import com.rugbypro.app.ui.components.LiveStatsSection
 import com.rugbypro.app.domain.usecase.RugbyDateUtils
 import com.rugbypro.app.ui.components.EmptyLiveMatchesCard
 import com.rugbypro.app.ui.components.MatchLineupShowcaseCard
+import com.rugbypro.app.ui.components.MatchLiveCoverageSection
 import com.rugbypro.app.ui.components.MatchOfficialsCard
 import com.rugbypro.app.ui.components.MatchScoreCard
 import com.rugbypro.app.ui.components.MatchWeatherCard
@@ -117,7 +119,7 @@ fun LiveMatchesScreen(
                 backgroundRes = R.drawable.bg_rugby_action,
                 eyebrow = "Tiempo Real",
                 title = "Partidos en vivo",
-                subtitle = "Actualización automática cada ${state.config.liveRefreshSec} s · Partidos activos y agenda de hoy",
+                subtitle = "Actualización en tiempo real (${if (live.isNotEmpty()) minOf(state.config.liveRefreshSec, 15) else state.config.liveRefreshSec} s) · Partidos activos y agenda de hoy",
                 trailing = {
                     if (live.isNotEmpty()) PulsingLiveIndicator()
                 }
@@ -483,6 +485,7 @@ fun StandingsScreen(
 @Composable
 fun MatchDetailDialog(
     match: RugbyMatch,
+    news: List<NewsArticle> = emptyList(),
     onDismiss: () -> Unit,
     onSelectPlayer: (isHome: Boolean, player: PlayerProfile) -> Unit = { _, _ -> }
 ) {
@@ -563,7 +566,7 @@ fun MatchDetailDialog(
                                     text = when {
                                         isDraw && match.status == MatchStatus.FINISHED -> "Empate · Final"
                                         match.isExtraTime -> "Tiempo extra"
-                                        match.status == MatchStatus.LIVE -> match.minuteDisplay.ifBlank { "EN VIVO" }
+                                        match.status == MatchStatus.LIVE -> listOf(match.periodDisplay, match.minuteDisplay).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "EN VIVO" }
                                         else -> match.periodDisplay
                                     },
                                     style = MaterialTheme.typography.labelSmall,
@@ -690,6 +693,8 @@ fun MatchDetailDialog(
                     HorizontalDivider()
                     Text("Estadísticas en vivo", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.secondary)
                     LiveStatsSection(match.liveStats)
+                    HorizontalDivider()
+                    MatchLiveCoverageSection(match = match, allNews = news)
                 }
             }
         }

@@ -13,6 +13,7 @@ import com.rugbypro.app.data.remote.RugbyJsonParser
 import com.rugbypro.app.domain.model.AppConfig
 import com.rugbypro.app.domain.model.NewsArticle
 import com.rugbypro.app.domain.model.RugbyDashboard
+import com.rugbypro.app.domain.model.RugbyMatch
 import com.rugbypro.app.domain.repository.RugbyRepository
 import com.rugbypro.app.domain.usecase.CrossVerifyMatchesUseCase
 import com.rugbypro.app.live.PreMatchAlarmScheduler
@@ -108,11 +109,15 @@ class RugbyRepositoryImpl(
         }
 
         val baseDash = RugbyJsonParser.parseEngineSnapshot(finalPayload, savedIds)
-        val peerMatches = result.worldRugbyMatches + result.secondaryLiveMatches
         val anyRemoteHealthy = result.healthItems.any { it.isHealthy }
-        val mergedMatches = CrossVerifyMatchesUseCase.execute(
+        val step1 = CrossVerifyMatchesUseCase.execute(
             primary = baseDash.matches,
-            secondary = peerMatches,
+            secondary = result.worldRugbyMatches,
+            fromLocalCacheOnly = !anyRemoteHealthy
+        )
+        val mergedMatches = CrossVerifyMatchesUseCase.execute(
+            primary = step1,
+            secondary = result.secondaryLiveMatches,
             fromLocalCacheOnly = !anyRemoteHealthy
         )
         val withOfficialDetails = if (anyRemoteHealthy) {
@@ -134,15 +139,37 @@ class RugbyRepositoryImpl(
         runCatching { PreMatchAlarmScheduler.scheduleUpcoming(context, withWeather) }
 
         val allSaved = dao.getAllSavedNews().map { it.toDomain() }
-        val liveIds = baseDash.news.map { it.id }.toSet()
-        val extraSaved = allSaved.filter { it.id !in liveIds }
+        val savedIdsSet = allSaved.map { it.id }.toSet()
+        val combinedNews = mutableListOf<NewsArticle>()
+        val seenNewsKeys = mutableSetOf<String>()
+        for (art in result.liveNews + baseDash.news + allSaved) {
+            val key = art.title.lowercase().replace(Regex("[^a-z0-9]"), "").take(64)
+            if (key.isBlank() || key !in seenNewsKeys) {
+                if (key.isNotBlank()) seenNewsKeys.add(key)
+                combinedNews.add(art.copy(savedOffline = art.id in savedIdsSet || art.savedOffline))
+            }
+        }
 
         baseDash.copy(
             matches = withWeather,
-            news = baseDash.news + extraSaved,
+            news = combinedNews,
             sourcesHealth = emptyList(),
             isOfflineFallback = !anyRemoteHealthy
         )
+    }
+
+    override suspend fun refreshMatchDetail(match: RugbyMatch): RugbyMatch = withContext(Dispatchers.IO) {
+        val cfg = dao.getConfigEntity()?.toDomain() ?: AppConfig()
+        val (cachedPayload, _) = readLocalPayload()
+        val savedIds = dao.getAllSavedNews().map { it.id }.toSet()
+        val baseDash = runCatching { RugbyJsonParser.parseEngineSnapshot(cachedPayload, savedIds) }.getOrNull()
+        val enriched = runCatching {
+            cascade.fetchSingleMatchLiveDetail(match, cfg.apiTimeoutMs)
+        }.getOrDefault(match)
+        val withKits = RugbyJsonParser.attachTeamKitsToMatches(listOf(enriched), baseDash?.teams.orEmpty()).first()
+        runCatching {
+            cascade.enrichMatchesWithWeather(listOf(withKits), cfg.apiTimeoutMs, bypassCacheForMatchId = withKits.id).first()
+        }.getOrDefault(withKits)
     }
 
     override suspend fun toggleSavedNews(article: NewsArticle): List<NewsArticle> = withContext(Dispatchers.IO) {
