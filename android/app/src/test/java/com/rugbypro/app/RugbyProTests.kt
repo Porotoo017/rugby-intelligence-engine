@@ -10,7 +10,6 @@ import com.rugbypro.app.domain.model.RugbyMatch
 import com.rugbypro.app.domain.model.TeamKit
 import com.rugbypro.app.domain.model.TeamProfile
 import com.rugbypro.app.data.remote.RugbyCascadeClient
-import com.rugbypro.app.data.remote.RugbyJsonParser
 import com.rugbypro.app.domain.model.MatchDayPart
 import com.rugbypro.app.domain.model.ThermalZone
 import com.rugbypro.app.domain.model.VerificationStatus
@@ -244,7 +243,9 @@ class RugbyProTests {
 
     @Test
     fun `date utils formats and normalizes all dates to dd_MM_yyyy`() {
-        assertEquals("26/11/2026 · 17:10", RugbyDateUtils.normalizeDisplayDate("Sáb 26 Nov · 17:10 ART"))
+        val curYear = java.time.LocalDate.now().year
+        assertEquals("26/11/$curYear · 17:10", RugbyDateUtils.normalizeDisplayDate("Sáb 26 Nov · 17:10 ART"))
+        assertEquals("26/11/2026 · 17:10", RugbyDateUtils.normalizeDisplayDate("Sáb 26 Nov 2026 · 17:10 ART"))
         assertEquals("26/11/2026", RugbyDateUtils.normalizeDisplayDate("2026-11-26"))
         val formatted = RugbyDateUtils.formatLocalDateOnly(1_764_180_000L, "")
         assertTrue(Regex("^\\d{2}/\\d{2}/\\d{4}$").matches(formatted))
