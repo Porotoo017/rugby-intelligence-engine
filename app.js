@@ -1667,6 +1667,15 @@
     els.refreshBtn.addEventListener('click', () => loadData(true));
   }
 
+  const isIosDevice = /iphone|ipad|ipod/i.test(navigator.userAgent || '');
+  const isStandaloneApp = window.navigator.standalone === true ||
+    (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+
+  if (isIosDevice && !isStandaloneApp && els.installBtn) {
+    els.installBtn.classList.remove('hidden');
+    els.installBtn.textContent = 'Instalar iPhone';
+  }
+
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     state.deferredInstall = e;
@@ -1675,11 +1684,30 @@
 
   if (els.installBtn) {
     els.installBtn.addEventListener('click', async () => {
-      if (!state.deferredInstall) return;
-      state.deferredInstall.prompt();
-      await state.deferredInstall.userChoice;
-      state.deferredInstall = null;
-      els.installBtn.classList.add('hidden');
+      if (state.deferredInstall) {
+        state.deferredInstall.prompt();
+        await state.deferredInstall.userChoice;
+        state.deferredInstall = null;
+        els.installBtn.classList.add('hidden');
+        return;
+      }
+      if (isIosDevice && els.detailPanel && els.detailSheet) {
+        els.detailPanel.innerHTML =
+          '<div class="sheet-head"><h3>Instalar Rugby Pro en iPhone</h3><button type="button" class="sheet-close" id="closeIosGuideBtn">Cerrar</button></div>' +
+          '<div class="sheet-body" style="padding:16px;display:flex;flex-direction:column;gap:12px;">' +
+          '<p style="margin:0;line-height:1.45;"><strong>Opción 1 · Directo desde Safari (sin PC):</strong></p>' +
+          '<ol style="margin:0;padding-left:20px;line-height:1.55;">' +
+          '<li>Tocá el botón <strong>Compartir</strong> (cuadrado con flecha hacia arriba) en la barra de Safari.</li>' +
+          '<li>Elegí <strong>&ldquo;Agregar a pantalla de inicio&rdquo;</strong>.</li>' +
+          '<li>Tocá <strong>Agregar</strong>. Se instala con el ícono oficial y pantalla completa.</li>' +
+          '</ol>' +
+          '<p style="margin:4px 0 0;line-height:1.45;"><strong>Opción 2 · Archivo .IPA nativo (AltStore / Sideloadly / Xcode):</strong></p>' +
+          '<a href="https://github.com/Porotoo017/rugby-intelligence-engine/releases/download/v4.0-rugby-pro-max/Rugby-Pro-Max-iOS.ipa" target="_blank" rel="noopener" class="action-btn primary" style="text-align:center;text-decoration:none;display:inline-block;">Descargar Rugby-Pro-Max-iOS.ipa</a>' +
+          '</div>';
+        els.detailSheet.classList.remove('hidden');
+        const closeBtn = document.getElementById('closeIosGuideBtn');
+        if (closeBtn) closeBtn.addEventListener('click', closeSheet);
+      }
     });
   }
 

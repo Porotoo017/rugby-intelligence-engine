@@ -26,6 +26,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 
 data class RugbyUiState(
@@ -103,14 +105,37 @@ class RugbyViewModel(app: Application) : AndroidViewModel(app) {
     private val _uiState = MutableStateFlow(RugbyUiState())
     val uiState: StateFlow<RugbyUiState> = _uiState.asStateFlow()
 
+    private val safeScopeHandler = CoroutineExceptionHandler { _, _ ->
+        _uiState.update { it.copy(isLoading = false, isSyncing = false) }
+    }
+
     init {
-        viewModelScope.launch {
-            repository.observeConfig().collect { cfg ->
-                _uiState.update { it.copy(config = cfg) }
-            }
+        viewModelScope.launch(safeScopeHandler) {
+            repository.observeConfig()
+                .catch { /* keep default AppConfig on transient DB error */ }
+                .collect { cfg ->
+                    _uiState.update { it.copy(config = cfg) }
+                }
         }
-        viewModelScope.launch {
-            val initial = repository.loadInitialDashboard()
+        viewModelScope.launch(safeScopeHandler) {
+            val initial = runCatching { repository.loadInitialDashboard() }.getOrElse {
+                RugbyDashboard(
+                    generatedAtArg = "",
+                    nextArgentinaXV = null,
+                    nextArgentina7s = null,
+                    coachXV = "Felipe Contepomi",
+                    coach7s = "Santiago Gómez Cora",
+                    matches = emptyList(),
+                    competitions = emptyList(),
+                    standings = emptyList(),
+                    teams = emptyList(),
+                    rankingsMen = emptyList(),
+                    rankingsWomen = emptyList(),
+                    news = emptyList(),
+                    sourcesHealth = emptyList(),
+                    isOfflineFallback = true
+                )
+            }
             applyDashboard(initial, isLoading = false)
             refreshNow(forceSnapshot = true)
             tracker.start(

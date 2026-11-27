@@ -5,7 +5,7 @@ import com.rugbypro.app.data.local.AppConfigEntity
 import com.rugbypro.app.data.local.NotifiedEventEntity
 import com.rugbypro.app.data.local.RugbyProDatabase
 import com.rugbypro.app.data.local.SavedNewsEntity
-import com.rugbypro.app.data.local.SnapshotEntity
+import java.io.File
 import com.rugbypro.app.data.local.SourceHealthEntity
 import com.rugbypro.app.data.local.observeAppConfig
 import com.rugbypro.app.data.remote.RugbyCascadeClient
@@ -50,13 +50,31 @@ class RugbyRepositoryImpl(
         )
     }
 
-    private suspend fun readLocalPayload(): Pair<String, Boolean> {
-        val cached = dao.getSnapshot()
-        if (cached != null && cached.jsonPayload.isNotBlank()) {
-            return cached.jsonPayload to false
+    private fun snapshotCacheFile(): File = File(context.filesDir, "rugby_snapshot_cache.json")
+
+    private fun writeSnapshotFile(payload: String) {
+        if (payload.isBlank()) return
+        runCatching {
+            val target = snapshotCacheFile()
+            val tmp = File(context.filesDir, "rugby_snapshot_cache.json.tmp")
+            tmp.writeText(payload, Charsets.UTF_8)
+            if (!tmp.renameTo(target)) {
+                target.writeText(payload, Charsets.UTF_8)
+                tmp.delete()
+            }
         }
-        val seed = context.assets.open("rugby_seed.json").bufferedReader().use { it.readText() }
-        dao.saveSnapshot(SnapshotEntity(id = 1, jsonPayload = seed, updatedAtMs = System.currentTimeMillis()))
+    }
+
+    private suspend fun readLocalPayload(): Pair<String, Boolean> {
+        val cachedFile = snapshotCacheFile()
+        if (cachedFile.exists() && cachedFile.length() > 64L) {
+            val txt = runCatching { cachedFile.readText(Charsets.UTF_8) }.getOrNull()
+            if (!txt.isNullOrBlank()) {
+                return txt to false
+            }
+        }
+        val seed = context.assets.open("rugby_seed.json").bufferedReader(Charsets.UTF_8).use { it.readText() }
+        writeSnapshotFile(seed)
         return seed to true
     }
 
@@ -85,7 +103,7 @@ class RugbyRepositoryImpl(
         )
 
         val finalPayload = if (!result.snapshotJson.isNullOrBlank()) {
-            dao.saveSnapshot(SnapshotEntity(id = 1, jsonPayload = result.snapshotJson, updatedAtMs = System.currentTimeMillis()))
+            writeSnapshotFile(result.snapshotJson)
             result.snapshotJson
         } else {
             cachedPayload
@@ -142,16 +160,21 @@ class RugbyRepositoryImpl(
         val savedIdsSet = allSaved.map { it.id }.toSet()
         val combinedNews = mutableListOf<NewsArticle>()
         val seenNewsKeys = mutableSetOf<String>()
+        val seenNewsIds = mutableSetOf<String>()
         for (art in result.liveNews + baseDash.news + allSaved) {
-            val key = art.title.lowercase().replace(Regex("[^a-z0-9]"), "").take(64)
-            if (key.isBlank() || key !in seenNewsKeys) {
-                if (key.isNotBlank()) seenNewsKeys.add(key)
-                combinedNews.add(art.copy(savedOffline = art.id in savedIdsSet || art.savedOffline))
-            }
+            val normTitle = art.title.lowercase().replace(Regex("[^a-z0-9]"), "").take(64)
+            val effectiveId = art.id.ifBlank { "art_${combinedNews.size}_${normTitle.take(24)}" }
+            if (effectiveId in seenNewsIds) continue
+            if (normTitle.isNotBlank() && normTitle in seenNewsKeys) continue
+            seenNewsIds.add(effectiveId)
+            if (normTitle.isNotBlank()) seenNewsKeys.add(normTitle)
+            combinedNews.add(art.copy(id = effectiveId, savedOffline = effectiveId in savedIdsSet || art.savedOffline))
         }
 
+        val uniqueMatches = withWeather.distinctBy { it.id.ifBlank { "${it.homeName}_${it.awayName}_${it.timestampSec}" } }
+
         baseDash.copy(
-            matches = withWeather,
+            matches = uniqueMatches,
             news = combinedNews,
             sourcesHealth = emptyList(),
             isOfflineFallback = !anyRemoteHealthy

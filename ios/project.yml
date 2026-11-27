@@ -1,0 +1,21 @@
+name: RugbyProMax
+options:
+  bundleIdPrefix: com.rugbypro
+  deploymentTarget:
+    iOS: "15.0"
+targets:
+  RugbyProMax:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: RugbyProMax
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rugbypro.app
+        INFOPLIST_FILE: RugbyProMax/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.0"
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGNING_REQUIRED: "NO"

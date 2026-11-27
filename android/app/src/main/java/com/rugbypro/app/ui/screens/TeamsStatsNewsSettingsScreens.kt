@@ -20,7 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -155,7 +155,7 @@ fun TeamsSquadsScreen(
             }
         }
 
-        items(filtered.take(140), key = { "${it.key}_${it.name}" }) { team ->
+        itemsIndexed(filtered.take(140), key = { idx, team -> "tm_${idx}_${team.key}_${team.name}" }) { _, team ->
             GlassCard(
                 highlightAccent = team.name.contains("Argentina", true),
                 onClick = { viewModel.openTeamDetail(team) }
@@ -708,7 +708,7 @@ fun ComparisonScreen(
 
         if (state.compareMode == "teams") {
             val res = state.teamSearchResults
-            items(res.take(50), key = { "cmp_t_${it.key}_${it.name}" }) { team ->
+            itemsIndexed(res.take(50), key = { idx, team -> "cmp_t_${idx}_${team.key}_${team.name}" }) { _, team ->
                 GlassCard {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                         TeamCrestWithFlag(team.crestUrl, team.flagUrl, team.name, size = 44.dp)
@@ -736,7 +736,7 @@ fun ComparisonScreen(
                     GlassCard { Text("No se encontraron jugadores con esos filtros.") }
                 }
             } else {
-                items(res.take(70), key = { "cmp_p_${it.teamKey}_${it.player.jersey}_${it.player.name}" }) { entry ->
+                itemsIndexed(res.take(70), key = { idx, entry -> "cmp_p_${idx}_${entry.teamKey}_${entry.player.jersey}_${entry.player.name}" }) { _, entry ->
                     GlassCard(onClick = { viewModel.openPlayerDetail(entry) }) {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                             BroadcastPlayerMedallion(entry.player.photoUrl, entry.player.name, kit = entry.teamKit, jerseyNumber = entry.player.jersey, isCaptain = entry.player.captain, size = 54.dp, isOval = true)
@@ -846,7 +846,7 @@ fun NewsScreen(
         if (list.isEmpty()) {
             item { GlassCard { Text("Sin datos disponibles de noticias para este filtro.") } }
         } else {
-            items(list, key = { it.id }) { art ->
+            itemsIndexed(list, key = { idx, art -> "news_${idx}_${art.id}" }) { _, art ->
                 GlassCard {
                     if (art.imageUrl.isNotBlank()) {
                         SubcomposeAsyncImage(

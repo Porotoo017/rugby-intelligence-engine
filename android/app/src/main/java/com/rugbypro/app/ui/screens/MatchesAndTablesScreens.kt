@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -183,7 +183,7 @@ fun LiveMatchesScreen(
                     }
                 }
             } else {
-                items(live, key = { it.id }) { m ->
+                itemsIndexed(live, key = { idx, m -> "live_${idx}_${m.id}" }) { _, m ->
                     Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                         MatchScoreCard(match = m, favoriteTeam = state.config.favoriteTeam, onClick = { viewModel.openMatchDetail(m) })
                         GlassCard {
@@ -207,7 +207,7 @@ fun LiveMatchesScreen(
                         color = ElectricCyan
                     )
                 }
-                items(upcomingToday, key = { it.id }) { m ->
+                itemsIndexed(upcomingToday, key = { idx, m -> "up_${idx}_${m.id}" }) { _, m ->
                     MatchScoreCard(match = m, favoriteTeam = state.config.favoriteTeam, onClick = { viewModel.openMatchDetail(m) })
                 }
             }
@@ -310,7 +310,7 @@ fun FixtureResultsScreen(
                 }
             }
         } else {
-            items(list.take(150), key = { it.id }) { m ->
+            itemsIndexed(list.take(150), key = { idx, m -> "fix_${idx}_${m.id}" }) { _, m ->
                 MatchScoreCard(match = m, favoriteTeam = state.config.favoriteTeam, onClick = { viewModel.openMatchDetail(m) })
             }
         }
@@ -442,7 +442,7 @@ fun StandingsScreen(
             }
         } else {
             val rows = if (rankMode == "wr_men") dash?.rankingsMen.orEmpty() else dash?.rankingsWomen.orEmpty()
-            items(rows, key = { "${it.pos}_${it.teamName}" }) { r ->
+            itemsIndexed(rows, key = { idx, r -> "st_${idx}_${r.pos}_${r.teamName}" }) { _, r ->
                 val isFav = fav.isNotBlank() && r.teamName.contains(fav, ignoreCase = true)
                 GlassCard(highlightAccent = isFav) {
                     Row(

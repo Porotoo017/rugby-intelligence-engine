@@ -29,7 +29,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -629,14 +630,14 @@ fun HomeScreen(
             item {
                 Text("En juego ahora", style = MaterialTheme.typography.titleLarge, color = PitchGreen)
             }
-            items(live.take(3), key = { it.id }) { m ->
+            itemsIndexed(live.take(3), key = { idx, m -> "home_live_${idx}_${m.id}" }) { _, m ->
                 MatchScoreCard(match = m, favoriteTeam = state.config.favoriteTeam, onClick = { viewModel.openMatchDetail(m) })
             }
         } else if (todayUpcoming.isNotEmpty()) {
             item {
                 Text("Próximos de hoy", style = MaterialTheme.typography.titleLarge, color = ElectricCyan)
             }
-            items(todayUpcoming.take(3), key = { it.id }) { m ->
+            itemsIndexed(todayUpcoming.take(3), key = { idx, m -> "home_up_${idx}_${m.id}" }) { _, m ->
                 MatchScoreCard(match = m, favoriteTeam = state.config.favoriteTeam, onClick = { viewModel.openMatchDetail(m) })
             }
         }
@@ -687,7 +688,7 @@ fun HomeScreen(
                     }
                 }
             }
-            items(topNews, key = { it.id }) { art ->
+            itemsIndexed(topNews, key = { idx, art -> "home_news_${idx}_${art.id}" }) { _, art ->
                 GlassCard(onClick = { viewModel.selectSection(AppSection.NOTICIAS) }) {
                     Text(
                         text = art.category.ifBlank { "Rugby" },
@@ -795,6 +796,7 @@ private fun OnboardingOverlay(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .systemBarsPadding()
                 .verticalScroll(rememberScrollState())
                 .padding(Spacing.lg),
             verticalArrangement = Arrangement.SpaceBetween

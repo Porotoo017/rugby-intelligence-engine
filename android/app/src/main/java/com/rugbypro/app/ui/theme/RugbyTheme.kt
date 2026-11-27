@@ -1,6 +1,5 @@
 package com.rugbypro.app.ui.theme
 
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
@@ -8,11 +7,9 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -48,33 +45,19 @@ object Spacing {
     val xl = 32.dp
 }
 
-@OptIn(ExperimentalTextApi::class)
-private fun makeOutfitFamily(): FontFamily {
-    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        FontFamily(
-            Font(R.font.outfit_variable, FontWeight.Normal, variationSettings = FontVariation.Settings(FontVariation.weight(400))),
-            Font(R.font.outfit_variable, FontWeight.SemiBold, variationSettings = FontVariation.Settings(FontVariation.weight(600))),
-            Font(R.font.outfit_variable, FontWeight.Bold, variationSettings = FontVariation.Settings(FontVariation.weight(700))),
-            Font(R.font.outfit_variable, FontWeight.ExtraBold, variationSettings = FontVariation.Settings(FontVariation.weight(800)))
-        )
-    } else {
-        FontFamily.SansSerif
-    }
-}
+private fun makeOutfitFamily(): FontFamily = FontFamily(
+    Font(R.font.outfit_regular, FontWeight.Normal),
+    Font(R.font.outfit_semibold, FontWeight.SemiBold),
+    Font(R.font.outfit_bold, FontWeight.Bold),
+    Font(R.font.outfit_extrabold, FontWeight.ExtraBold)
+)
 
-@OptIn(ExperimentalTextApi::class)
-private fun makeInterFamily(): FontFamily {
-    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        FontFamily(
-            Font(R.font.inter_variable, FontWeight.Normal, variationSettings = FontVariation.Settings(FontVariation.weight(400))),
-            Font(R.font.inter_variable, FontWeight.Medium, variationSettings = FontVariation.Settings(FontVariation.weight(500))),
-            Font(R.font.inter_variable, FontWeight.SemiBold, variationSettings = FontVariation.Settings(FontVariation.weight(600))),
-            Font(R.font.inter_variable, FontWeight.Bold, variationSettings = FontVariation.Settings(FontVariation.weight(700)))
-        )
-    } else {
-        FontFamily.SansSerif
-    }
-}
+private fun makeInterFamily(): FontFamily = FontFamily(
+    Font(R.font.inter_regular, FontWeight.Normal),
+    Font(R.font.inter_medium, FontWeight.Medium),
+    Font(R.font.inter_semibold, FontWeight.SemiBold),
+    Font(R.font.inter_bold, FontWeight.Bold)
+)
 
 val OutfitFontFamily = makeOutfitFamily()
 val InterFontFamily = makeInterFamily()

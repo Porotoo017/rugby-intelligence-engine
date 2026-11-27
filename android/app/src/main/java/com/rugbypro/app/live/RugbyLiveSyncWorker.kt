@@ -8,7 +8,9 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.OutOfQuotaPolicy
+import androidx.work.ForegroundInfo
+import androidx.core.app.NotificationCompat
+import com.rugbypro.app.R
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -24,6 +26,18 @@ class RugbyLiveSyncWorker(
     appContext: Context,
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
+
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        RugbyNotificationManager.ensureChannels(applicationContext)
+        val notif = NotificationCompat.Builder(applicationContext, RugbyNotificationManager.CH_TRY)
+            .setSmallIcon(R.drawable.ic_notif_rugby)
+            .setContentTitle("Rugby Pro")
+            .setContentText("Actualizando partidos y planteles")
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .build()
+        return ForegroundInfo(9042, notif)
+    }
 
     override suspend fun doWork(): Result {
         return runCatching {
@@ -110,11 +124,13 @@ class RugbyLiveSyncWorker(
             val req = PeriodicWorkRequestBuilder<RugbyLiveSyncWorker>(15, TimeUnit.MINUTES)
                 .setConstraints(constraints)
                 .build()
-            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-                WORK_NAME,
-                ExistingPeriodicWorkPolicy.KEEP,
-                req
-            )
+            runCatching {
+                WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                    WORK_NAME,
+                    ExistingPeriodicWorkPolicy.KEEP,
+                    req
+                )
+            }
         }
 
         fun enqueueImmediatePreload(context: Context, matchId: String) {
@@ -127,14 +143,15 @@ class RugbyLiveSyncWorker(
             val req = OneTimeWorkRequestBuilder<RugbyLiveSyncWorker>()
                 .setConstraints(constraints)
                 .setInputData(data)
-                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 .build()
             val unique = PRELOAD_WORK_PREFIX + (matchId.ifBlank { "general" })
-            WorkManager.getInstance(context).enqueueUniqueWork(
-                unique,
-                ExistingWorkPolicy.KEEP,
-                req
-            )
+            runCatching {
+                WorkManager.getInstance(context).enqueueUniqueWork(
+                    unique,
+                    ExistingWorkPolicy.KEEP,
+                    req
+                )
+            }
         }
     }
 }

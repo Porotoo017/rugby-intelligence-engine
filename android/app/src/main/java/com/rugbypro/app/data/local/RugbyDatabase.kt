@@ -17,13 +17,6 @@ import com.rugbypro.app.domain.model.ThemeMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
-@Entity(tableName = "cached_snapshot")
-data class SnapshotEntity(
-    @PrimaryKey val id: Int = 1,
-    val jsonPayload: String,
-    val updatedAtMs: Long
-)
-
 @Entity(tableName = "saved_news")
 data class SavedNewsEntity(
     @PrimaryKey val id: String,
@@ -106,12 +99,6 @@ data class AppConfigEntity(
 
 @Dao
 interface RugbyDao {
-    @Query("SELECT * FROM cached_snapshot WHERE id = 1")
-    suspend fun getSnapshot(): SnapshotEntity?
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun saveSnapshot(entity: SnapshotEntity)
-
     @Query("SELECT * FROM saved_news ORDER BY savedAtMs DESC")
     suspend fun getAllSavedNews(): List<SavedNewsEntity>
 
@@ -148,13 +135,12 @@ interface RugbyDao {
 
 @Database(
     entities = [
-        SnapshotEntity::class,
         SavedNewsEntity::class,
         SourceHealthEntity::class,
         NotifiedEventEntity::class,
         AppConfigEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class RugbyProDatabase : RoomDatabase() {

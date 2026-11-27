@@ -1,10 +1,11 @@
-name: Build Rugby Pro Android APK & Brand Kit
+name: Build Rugby Pro Android APK & iOS IPA
 
 on:
   push:
     branches: [ main ]
     paths:
       - 'android/**'
+      - 'ios/**'
       - 'brand-kit/**'
       - 'ios-assets/**'
       - '.github/workflows/android_apk.yml'
@@ -35,31 +36,76 @@ jobs:
         working-directory: android
         run: gradle testDebugUnitTest --no-daemon
 
-      - name: Build Debug APK
+      - name: Build Signed Release APK (R8 Shrunk)
         working-directory: android
-        run: gradle assembleDebug --no-daemon
+        run: gradle assembleRelease --no-daemon
 
-      - name: Package APK and iOS/BrandKit Bundle
-        run: |
-          cp android/app/build/outputs/apk/debug/app-debug.apk Rugby-Pro-Max.apk
-          zip -r Rugby-Pro-Max-iOS-BrandKit.zip brand-kit ios-assets
+      - name: Package Release APK
+        run: cp android/app/build/outputs/apk/release/app-release.apk Rugby-Pro-Max.apk
 
-      - name: Upload Build Artifacts
+      - name: Upload Android Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Rugby-Pro-Max-Artifacts
+          name: Rugby-Pro-Max-Android
+          path: Rugby-Pro-Max.apk
+
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Build Unsigned iOS App Bundle
+        working-directory: ios
+        run: |
+          xcodebuild -project RugbyProMax.xcodeproj             -scheme RugbyProMax             -sdk iphoneos             -configuration Release             CODE_SIGNING_ALLOWED=NO             CODE_SIGNING_REQUIRED=NO             CODE_SIGNING_IDENTITY=""             build             SYMROOT="$PWD/build"
+
+      - name: Package iOS IPA & Xcode/BrandKit Bundle
+        run: |
+          mkdir -p Payload
+          cp -R ios/build/Release-iphoneos/RugbyProMax.app Payload/
+          zip -qry Rugby-Pro-Max-iOS.ipa Payload
+          zip -qry Rugby-Pro-Max-iOS-BrandKit.zip ios brand-kit ios-assets
+
+      - name: Upload iOS Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rugby-Pro-Max-iOS
           path: |
-            Rugby-Pro-Max.apk
+            Rugby-Pro-Max-iOS.ipa
             Rugby-Pro-Max-iOS-BrandKit.zip
 
-      - name: Publish APK & BrandKit to GitHub Release
+  publish-release:
+    needs: [build-apk, build-ios]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Android Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Rugby-Pro-Max-Android
+
+      - name: Download iOS Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: Rugby-Pro-Max-iOS
+
+      - name: Publish APK, iOS IPA & BrandKit to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v4.0-rugby-pro-max
-          name: Rugby Pro Max (Android APK + iOS BrandKit)
+          name: Rugby Pro Max (Android APK + iOS IPA)
           body: |
-            - **Android APK (`Rugby-Pro-Max.apk`)**: Arquitectura MVVM (`ui/`, `data/`, `domain/`, `live/`), rediseño Material 3 de lujo, nuevo logo escudo+balón, partidos en vivo estricto, camisetas titular/suplente verificadas, fichas de jugadores y comparador con buscador multi-filtro.
-            - **iOS + Brand Kit (`Rugby-Pro-Max-iOS-BrandKit.zip`)**: Logo maestro transparente 1024×1024, splashes 1080×1920 / 1920×1080, monocromos dorado/blanco/oscuro y `AppIcon.appiconset` + `LaunchImage.imageset` para Xcode.
+            - **Android APK (`Rugby-Pro-Max.apk`)**: Release firmada con optimización R8, caché local segura (sin límite 2MB de SQLite), fuentes estáticas compatibles con Android 8–16, partidos en vivo al segundo, camisetas, clima y árbitros.
+            - **iPhone / iOS IPA (`Rugby-Pro-Max-iOS.ipa`)**: App nativa SwiftUI + WebKit con ícono oficial y splash cinematográfica (instalar vía AltStore / Sideloadly / Xcode), **o instalación directa en 2 toques desde Safari** en `https://porotoo017.github.io/rugby-intelligence-engine/` (Compartir → Agregar a pantalla de inicio).
+            - **Xcode + Brand Kit (`Rugby-Pro-Max-iOS-BrandKit.zip`)**: Proyecto Xcode completo (`ios/`), logo maestro 1024×1024, splashes y `AppIcon.appiconset`.
           files: |
             Rugby-Pro-Max.apk
+            Rugby-Pro-Max-iOS.ipa
             Rugby-Pro-Max-iOS-BrandKit.zip

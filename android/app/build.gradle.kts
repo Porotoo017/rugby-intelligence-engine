@@ -13,8 +13,8 @@ android {
         applicationId = "com.rugbypro.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "3.0.0-Pro"
+        versionCode = 2
+        versionName = "4.0.1-Pro"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
@@ -23,7 +23,9 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

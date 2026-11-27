@@ -7,7 +7,7 @@ import com.rugbypro.app.live.RugbyNotificationManager
 class RugbyProApplication : Application() {
     override fun onCreate() {
         super.onCreate()
-        RugbyNotificationManager.ensureChannels(this)
-        RugbyLiveSyncWorker.schedulePeriodic(this)
+        runCatching { RugbyNotificationManager.ensureChannels(this) }
+        runCatching { RugbyLiveSyncWorker.schedulePeriodic(this) }
     }
 }
