@@ -36,7 +36,7 @@ class RugbyLiveSyncWorker(
 
             val cfg = repo.observeConfig().first()
             val prev = repo.loadInitialDashboard()
-            val latest = repo.syncWithCascade(forceLiveRefresh = true)
+            val latest = repo.syncWithCascade(forceLiveRefresh = true, forcePreMatchId = prematchId.takeIf { it.isNotBlank() })
 
             if (prematchId.isNotBlank()) {
                 prefetchMatchMedia(applicationContext, latest, prematchId)
@@ -84,6 +84,10 @@ class RugbyLiveSyncWorker(
                 player.photoUrl?.takeIf { it.isNotBlank() }?.let { urls.add(it) }
                 player.nationalityFlagUrl?.takeIf { it.isNotBlank() }?.let { urls.add(it) }
             }
+        }
+        (targetMatch.homeLineup + targetMatch.awayLineup).forEach { player ->
+            player.photoUrl?.takeIf { it.isNotBlank() }?.let { urls.add(it) }
+            player.nationalityFlagUrl?.takeIf { it.isNotBlank() }?.let { urls.add(it) }
         }
 
         urls.take(65).forEach { url ->

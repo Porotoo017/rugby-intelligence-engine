@@ -10,6 +10,7 @@ import com.rugbypro.app.domain.model.RugbyMatch
 import com.rugbypro.app.domain.model.TeamKit
 import com.rugbypro.app.domain.model.TeamProfile
 import com.rugbypro.app.data.remote.RugbyCascadeClient
+import com.rugbypro.app.data.remote.RugbyJsonParser
 import com.rugbypro.app.domain.model.MatchDayPart
 import com.rugbypro.app.domain.model.ThermalZone
 import com.rugbypro.app.domain.model.VerificationStatus
@@ -239,5 +240,49 @@ class RugbyProTests {
         assertEquals(ThermalZone.CALOR, WeatherClassificationUseCase.thermalZoneFor(29.0))
         assertEquals("58.3%", RugbyDateUtils.formatPercent(58.34))
         assertEquals(MatchDayPart.NOCHE, RugbyDateUtils.inferDayPart(0L, "21:15"))
+    }
+
+    @Test
+    fun `date utils formats and normalizes all dates to dd_MM_yyyy`() {
+        assertEquals("26/11/2026 · 17:10", RugbyDateUtils.normalizeDisplayDate("Sáb 26 Nov · 17:10 ART"))
+        assertEquals("26/11/2026", RugbyDateUtils.normalizeDisplayDate("2026-11-26"))
+        val formatted = RugbyDateUtils.formatLocalDateOnly(1_764_180_000L, "")
+        assertTrue(Regex("^\\d{2}/\\d{2}/\\d{4}$").matches(formatted))
+    }
+
+    @Test
+    fun `home team falls back to away kit when home kit is missing`() {
+        val onlyAway = TeamProfile(
+            key = "t1", name = "Test Club", crestUrl = "", flagUrl = "", coach = "", stadium = "",
+            worldRank = null, groups = emptyList(), leagues = emptyList(), division = "", roster = emptyList(),
+            homeKit = null,
+            awayKit = TeamKit(true, "#112233", "#FFD700", "#112233", "solid", "Suplente")
+        )
+        val resolved = ResolveMatchKitsUseCase.resolveForMatch(onlyAway, null)
+        assertEquals(ActiveKitRole.AWAY, resolved.homeRole)
+        assertEquals("#112233", resolved.homeKit?.primaryHex)
+    }
+
+    @Test
+    fun `world rugby match detail parses referee officials and lineups`() {
+        val json = """
+            {
+              "officials": [
+                {"position": "Referee", "official": {"name": {"display": "Hollie Davidson"}, "country": "Scotland"}},
+                {"position": "TMO", "official": {"name": {"display": "Mike Adamson"}, "country": "Scotland"}}
+              ],
+              "teams": [
+                {"teamList": {"captainIds": ["1"], "list": [{"number": "10", "positionLabel": "Apertura", "position": "FH", "player": {"id": "1", "name": {"display": "Santiago Carreras"}}}]}},
+                {"teamList": {"captainIds": [], "list": [{"number": "9", "positionLabel": "Medio Scrum", "position": "SH", "player": {"id": "2", "name": {"display": "Antoine Dupont"}}}]}}
+              ]
+            }
+        """.trimIndent()
+        val det = RugbyJsonParser.parseWorldRugbyMatchDetail(json)
+        assertEquals("Hollie Davidson (Scotland)", det.refereeName)
+        assertEquals(2, det.officials.size)
+        assertEquals("Árbitro principal", det.officials.first().role)
+        assertEquals("Santiago Carreras", det.homeLineup.first().name)
+        assertTrue(det.homeLineup.first().captain)
+        assertEquals("Antoine Dupont", det.awayLineup.first().name)
     }
 }

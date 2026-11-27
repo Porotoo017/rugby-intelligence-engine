@@ -73,7 +73,7 @@ class RugbyRepositoryImpl(
         )
     }
 
-    override suspend fun syncWithCascade(forceLiveRefresh: Boolean): RugbyDashboard = withContext(Dispatchers.IO) {
+    override suspend fun syncWithCascade(forceLiveRefresh: Boolean, forcePreMatchId: String?): RugbyDashboard = withContext(Dispatchers.IO) {
         val cfg = dao.getConfigEntity()?.toDomain() ?: AppConfig()
         val savedIds = dao.getAllSavedNews().map { it.id }.toSet()
         val (cachedPayload, _) = readLocalPayload()
@@ -115,9 +115,18 @@ class RugbyRepositoryImpl(
             secondary = peerMatches,
             fromLocalCacheOnly = !anyRemoteHealthy
         )
-        val withKits = RugbyJsonParser.attachTeamKitsToMatches(mergedMatches, baseDash.teams)
+        val withOfficialDetails = if (anyRemoteHealthy) {
+            runCatching {
+                cascade.enrichMatchesWithOfficialDetails(mergedMatches, cfg.apiTimeoutMs, forcePreMatchId)
+            }.getOrDefault(mergedMatches)
+        } else {
+            mergedMatches
+        }
+        val withKits = RugbyJsonParser.attachTeamKitsToMatches(withOfficialDetails, baseDash.teams)
         val withWeather = if (anyRemoteHealthy) {
-            runCatching { cascade.enrichMatchesWithWeather(withKits, cfg.apiTimeoutMs) }.getOrDefault(withKits)
+            runCatching {
+                cascade.enrichMatchesWithWeather(withKits, cfg.apiTimeoutMs, bypassCacheForMatchId = forcePreMatchId)
+            }.getOrDefault(withKits)
         } else {
             withKits
         }

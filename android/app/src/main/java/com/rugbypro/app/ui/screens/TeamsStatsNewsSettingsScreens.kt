@@ -77,6 +77,7 @@ import com.rugbypro.app.live.RugbyNotificationManager
 import com.rugbypro.app.ui.RugbyUiState
 import com.rugbypro.app.ui.RugbyViewModel
 import com.rugbypro.app.ui.components.GlassCard
+import com.rugbypro.app.ui.components.BroadcastPlayerMedallion
 import com.rugbypro.app.ui.components.PlayerAvatar
 import com.rugbypro.app.ui.components.RugbyJerseyBadge
 import com.rugbypro.app.ui.components.SectionBackdropBanner
@@ -274,7 +275,7 @@ fun TeamDetailDialog(
                                     color = MetallicGold,
                                     modifier = Modifier.width(34.dp)
                                 )
-                                PlayerAvatar(p.photoUrl, p.name, size = 38.dp)
+                                BroadcastPlayerMedallion(p.photoUrl, p.name, kit = team.homeKit ?: team.awayKit, jerseyNumber = p.jersey, isCaptain = p.captain, size = 48.dp, isOval = true)
                                 Spacer(Modifier.width(Spacing.sm))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
@@ -395,7 +396,7 @@ fun PlayerDetailDialog(
                             .padding(Spacing.md),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        PlayerAvatar(p.photoUrl, p.name, size = 86.dp)
+                        BroadcastPlayerMedallion(p.photoUrl, p.name, kit = entry.teamKit, jerseyNumber = p.jersey, isCaptain = p.captain, size = 94.dp, isOval = true)
                         Spacer(Modifier.width(Spacing.md))
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -615,14 +616,14 @@ fun ComparisonScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                                PlayerAvatar(pComp.left.photoUrl, pComp.left.name, size = 54.dp)
+                                BroadcastPlayerMedallion(pComp.left.photoUrl, pComp.left.name, kit = state.comparePlayerA?.teamKit, jerseyNumber = pComp.left.jersey, isCaptain = pComp.left.captain, size = 62.dp, isOval = true)
                                 Spacer(Modifier.height(4.dp))
                                 Text(pComp.left.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(pComp.leftTeam, style = MaterialTheme.typography.labelSmall, color = PitchGreen)
                             }
                             Text("VS", style = MaterialTheme.typography.titleLarge, color = ElectricCyan, modifier = Modifier.padding(horizontal = 8.dp))
                             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                                PlayerAvatar(pComp.right.photoUrl, pComp.right.name, size = 54.dp)
+                                BroadcastPlayerMedallion(pComp.right.photoUrl, pComp.right.name, kit = state.comparePlayerB?.teamKit, jerseyNumber = pComp.right.jersey, isCaptain = pComp.right.captain, size = 62.dp, isOval = true)
                                 Spacer(Modifier.height(4.dp))
                                 Text(pComp.right.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(pComp.rightTeam, style = MaterialTheme.typography.labelSmall, color = MetallicGold)
@@ -738,7 +739,7 @@ fun ComparisonScreen(
                 items(res.take(70), key = { "cmp_p_${it.teamKey}_${it.player.jersey}_${it.player.name}" }) { entry ->
                     GlassCard(onClick = { viewModel.openPlayerDetail(entry) }) {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                            PlayerAvatar(entry.player.photoUrl, entry.player.name, size = 46.dp)
+                            BroadcastPlayerMedallion(entry.player.photoUrl, entry.player.name, kit = entry.teamKit, jerseyNumber = entry.player.jersey, isCaptain = entry.player.captain, size = 54.dp, isOval = true)
                             Spacer(Modifier.width(Spacing.sm))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
@@ -865,7 +866,7 @@ fun NewsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = listOf(art.category, art.publishedLabel).filter { it.isNotBlank() }.joinToString(" · "),
+                            text = listOf(art.category, RugbyDateUtils.normalizeDisplayDate(art.publishedLabel)).filter { it.isNotBlank() }.joinToString(" · "),
                             style = MaterialTheme.typography.labelMedium,
                             color = MetallicGold,
                             modifier = Modifier.weight(1f)

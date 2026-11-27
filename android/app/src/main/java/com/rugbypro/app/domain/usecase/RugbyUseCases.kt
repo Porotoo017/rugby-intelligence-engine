@@ -75,6 +75,10 @@ object CrossVerifyMatchesUseCase {
                         weather = m.weather ?: peer.weather,
                         statusNote = peer.statusNote ?: m.statusNote,
                         isExtraTime = m.isExtraTime || peer.isExtraTime,
+                        refereeName = peer.refereeName.ifBlank { m.refereeName },
+                        officials = if (peer.officials.isNotEmpty()) peer.officials else m.officials,
+                        homeLineup = if (peer.homeLineup.isNotEmpty()) peer.homeLineup else m.homeLineup,
+                        awayLineup = if (peer.awayLineup.isNotEmpty()) peer.awayLineup else m.awayLineup,
                         verificationStatus = if (verified) VerificationStatus.VERIFIED else VerificationStatus.PENDING_VERIFICATION,
                         verifiedSources = sources
                     )
@@ -179,22 +183,24 @@ object ResolveMatchKitsUseCase {
         homeTeam: TeamProfile?,
         awayTeam: TeamProfile?
     ): ResolvedMatchKits {
-        val hHome = homeTeam?.homeKit
-        val aHome = awayTeam?.homeKit
-        val aAway = awayTeam?.awayKit
-
-        val homeRole = if (hHome != null && hHome.verified) ActiveKitRole.HOME else ActiveKitRole.UNKNOWN
-        val clash = hHome != null && aHome != null && colorDistance(hHome.primaryHex, aHome.primaryHex) < 115.0
-
-        val (awayRole, activeAwayKit) = when {
-            clash && aAway != null && aAway.verified -> ActiveKitRole.AWAY to aAway
-            aHome != null && aHome.verified -> ActiveKitRole.HOME to aHome
-            aAway != null && aAway.verified -> ActiveKitRole.AWAY to aAway
+        val hHome = homeTeam?.homeKit?.takeIf { it.verified }
+        val hAway = homeTeam?.awayKit?.takeIf { it.verified }
+        val (homeRole, activeHomeKit) = when {
+            hHome != null -> ActiveKitRole.HOME to hHome
+            hAway != null -> ActiveKitRole.AWAY to hAway
             else -> ActiveKitRole.UNKNOWN to null
         }
-
+        val aHome = awayTeam?.homeKit?.takeIf { it.verified }
+        val aAway = awayTeam?.awayKit?.takeIf { it.verified }
+        val clash = activeHomeKit != null && aHome != null && colorDistance(activeHomeKit.primaryHex, aHome.primaryHex) < 115.0
+        val (awayRole, activeAwayKit) = when {
+            clash && aAway != null -> ActiveKitRole.AWAY to aAway
+            aHome != null -> ActiveKitRole.HOME to aHome
+            aAway != null -> ActiveKitRole.AWAY to aAway
+            else -> ActiveKitRole.UNKNOWN to null
+        }
         return ResolvedMatchKits(
-            homeKit = hHome?.takeIf { it.verified },
+            homeKit = activeHomeKit,
             awayKit = activeAwayKit,
             homeRole = homeRole,
             awayRole = awayRole
@@ -294,7 +300,8 @@ object SearchTeamsAndPlayersUseCase {
                             teamName = t.name,
                             teamCrestUrl = t.crestUrl,
                             teamFlagUrl = p.nationalityFlagUrl ?: t.flagUrl,
-                            player = p
+                            player = p,
+                            teamKit = t.homeKit ?: t.awayKit
                         )
                     )
                 }
@@ -422,14 +429,51 @@ object DetectKeyLiveEventsUseCase {
 
 
 object RugbyDateUtils {
+    private val MONTH_MAP = mapOf(
+        "ene" to 1, "jan" to 1, "feb" to 2, "mar" to 3, "abr" to 4, "apr" to 4,
+        "may" to 5, "jun" to 6, "jul" to 7, "ago" to 8, "aug" to 8,
+        "sep" to 9, "oct" to 10, "nov" to 11, "dic" to 12, "dec" to 12
+    )
+    private val ISO_REGEX = Regex("^(\\d{4})-(\\d{2})-(\\d{2})(?:[T ](\\d{2}:\\d{2}))?.*")
+    private val TEXT_DATE_REGEX = Regex("(\\d{1,2})\\s+([A-Za-zÁÉÍÓÚáéíóú]{3})(?:\\s+(\\d{4}))?(?:\\s*[·,]\\s*(\\d{2}:\\d{2}))?")
+
     fun formatLocalKickoff(timestampSec: Long, fallbackDateArg: String): String {
-        if (timestampSec <= 0L) return fallbackDateArg.ifBlank { "Horario por confirmar" }
+        if (timestampSec <= 0L) return normalizeDisplayDate(fallbackDateArg).ifBlank { "Horario por confirmar" }
         return runCatching {
             val zone = java.time.ZoneId.systemDefault()
             val dt = java.time.Instant.ofEpochSecond(timestampSec).atZone(zone)
-            val fmt = java.time.format.DateTimeFormatter.ofPattern("EEE d MMM, HH:mm", Locale("es", "AR"))
-            dt.format(fmt).replaceFirstChar { it.titlecase(Locale("es", "AR")) }
-        }.getOrElse { fallbackDateArg }
+            dt.format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy · HH:mm", Locale.getDefault()))
+        }.getOrElse { normalizeDisplayDate(fallbackDateArg) }
+    }
+
+    fun formatLocalDateOnly(timestampSec: Long, fallbackDateArg: String = ""): String {
+        if (timestampSec <= 0L) {
+            return normalizeDisplayDate(fallbackDateArg).substringBefore(" ·").ifBlank { "Por confirmar" }
+        }
+        return runCatching {
+            val zone = java.time.ZoneId.systemDefault()
+            val dt = java.time.Instant.ofEpochSecond(timestampSec).atZone(zone)
+            dt.format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy", Locale.getDefault()))
+        }.getOrElse { normalizeDisplayDate(fallbackDateArg).substringBefore(" ·") }
+    }
+
+    fun normalizeDisplayDate(raw: String): String {
+        val clean = raw.replace(" ART", "").trim()
+        if (clean.isBlank()) return ""
+        ISO_REGEX.matchEntire(clean)?.let { m ->
+            val dmy = "${m.groupValues[3]}/${m.groupValues[2]}/${m.groupValues[1]}"
+            val hm = m.groupValues[4]
+            return if (hm.isNotBlank()) "$dmy · $hm" else dmy
+        }
+        TEXT_DATE_REGEX.find(clean)?.let { m ->
+            val day = m.groupValues[1].toIntOrNull() ?: return clean
+            val mon = MONTH_MAP[m.groupValues[2].lowercase()] ?: return clean
+            val year = m.groupValues[3].toIntOrNull() ?: java.time.LocalDate.now().year
+            val dmy = String.format(Locale.US, "%02d/%02d/%04d", day, mon, year)
+            val hm = m.groupValues[4]
+            return if (hm.isNotBlank()) "$dmy · $hm" else dmy
+        }
+        return clean
     }
 
     fun inferDayPart(timestampSec: Long, fallbackTimeArg: String = ""): MatchDayPart {

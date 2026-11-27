@@ -6,6 +6,7 @@ import com.rugbypro.app.domain.model.MatchWeather
 import com.rugbypro.app.domain.model.RugbyMatch
 import com.rugbypro.app.domain.model.SourceHealthItem
 import com.rugbypro.app.domain.usecase.CrossVerifyMatchesUseCase
+import com.rugbypro.app.domain.usecase.PreMatchWindowUseCase
 import com.rugbypro.app.domain.usecase.RugbyDateUtils
 import com.rugbypro.app.domain.usecase.WeatherClassificationUseCase
 import kotlinx.coroutines.delay
@@ -181,8 +182,17 @@ class RugbyCascadeClient {
                 val sumUrl = "https://site.api.espn.com/apis/site/v2/sports/rugby/${m.leagueId}/summary?event=$evId"
                 val (sumRaw, _) = fetchWithBackoffAndRotation(api, listOf(sumUrl), maxAttemptsPerUrl = 1)
                 if (sumRaw != null) {
-                    val (events, stats) = RugbyJsonParser.parseEspnSummaryDetails(sumRaw, m.homeName, m.awayName)
-                    enrichedSecondary.add(m.copy(events = events, liveStats = stats))
+                    val det = RugbyJsonParser.parseEspnSummaryFull(sumRaw, m.homeName, m.awayName)
+                    enrichedSecondary.add(
+                        m.copy(
+                            events = det.events,
+                            liveStats = det.liveStats,
+                            refereeName = det.refereeName.ifBlank { m.refereeName },
+                            officials = det.officials.ifEmpty { m.officials },
+                            homeLineup = det.homeLineup.ifEmpty { m.homeLineup },
+                            awayLineup = det.awayLineup.ifEmpty { m.awayLineup }
+                        )
+                    )
                     continue
                 }
             }
@@ -232,16 +242,74 @@ class RugbyCascadeClient {
      * Enriquecimiento meteorológico silencioso (uso interno sin exponer proveedor en UI)
      * para partidos en vivo, próximos de hoy o próximos de Argentina/favoritos.
      */
+    suspend fun enrichMatchesWithOfficialDetails(
+        matches: List<RugbyMatch>,
+        timeoutMs: Long,
+        forcePreMatchId: String? = null
+    ): List<RugbyMatch> {
+        val api = buildApi(timeoutMs.coerceIn(4000L, 14000L))
+        val nowMs = System.currentTimeMillis()
+        val targets = matches.filter { m ->
+            m.id == forcePreMatchId ||
+                m.status == MatchStatus.LIVE ||
+                PreMatchWindowUseCase.isInsideThirtyMinuteWindow(m, nowMs)
+        }.take(8)
+        if (targets.isEmpty()) return matches
+
+        val updatedById = mutableMapOf<String, RugbyMatch>()
+        for (m in targets) {
+            if (m.id.startsWith("wr_")) {
+                val rawId = m.id.removePrefix("wr_")
+                val url = "https://api.wr-rims-prod.pulselive.com/rugby/v3/match/$rawId"
+                val (raw, _) = fetchWithBackoffAndRotation(api, listOf(url), maxAttemptsPerUrl = 1)
+                if (raw != null) {
+                    val det = runCatching { RugbyJsonParser.parseWorldRugbyMatchDetail(raw) }.getOrNull()
+                    if (det != null) {
+                        updatedById[m.id] = m.copy(
+                            refereeName = det.refereeName.ifBlank { m.refereeName },
+                            officials = det.officials.ifEmpty { m.officials },
+                            homeLineup = det.homeLineup.ifEmpty { m.homeLineup },
+                            awayLineup = det.awayLineup.ifEmpty { m.awayLineup },
+                            events = if (det.events.isNotEmpty()) det.events else m.events
+                        )
+                    }
+                }
+            } else if (m.id.startsWith("espn_")) {
+                val evId = m.id.removePrefix("espn_")
+                val url = "https://site.api.espn.com/apis/site/v2/sports/rugby/${m.leagueId}/summary?event=$evId"
+                val (raw, _) = fetchWithBackoffAndRotation(api, listOf(url), maxAttemptsPerUrl = 1)
+                if (raw != null) {
+                    val det = runCatching { RugbyJsonParser.parseEspnSummaryFull(raw, m.homeName, m.awayName) }.getOrNull()
+                    if (det != null) {
+                        updatedById[m.id] = m.copy(
+                            refereeName = det.refereeName.ifBlank { m.refereeName },
+                            officials = det.officials.ifEmpty { m.officials },
+                            homeLineup = det.homeLineup.ifEmpty { m.homeLineup },
+                            awayLineup = det.awayLineup.ifEmpty { m.awayLineup },
+                            events = if (det.events.isNotEmpty()) det.events else m.events,
+                            liveStats = det.liveStats ?: m.liveStats
+                        )
+                    }
+                }
+            }
+        }
+        if (updatedById.isEmpty()) return matches
+        return matches.map { updatedById[it.id] ?: it }
+    }
+
     suspend fun enrichMatchesWithWeather(
         matches: List<RugbyMatch>,
-        timeoutMs: Long
+        timeoutMs: Long,
+        bypassCacheForMatchId: String? = null
     ): List<RugbyMatch> {
         val api = buildApi(timeoutMs.coerceIn(3500L, 12000L))
         val nowMs = System.currentTimeMillis()
         val targets = matches.filter {
-            it.status == MatchStatus.LIVE ||
+            it.id == bypassCacheForMatchId ||
+                it.status == MatchStatus.LIVE ||
+                PreMatchWindowUseCase.isInsideThirtyMinuteWindow(it, nowMs) ||
                 (it.status == MatchStatus.SCHEDULED && (it.isArgentina || it.timestampSec * 1000L - nowMs in -3600_000L..86_400_000L))
-        }.take(10)
+        }.take(12)
         if (targets.isEmpty()) return matches
 
         val weatherByMatchId = mutableMapOf<String, MatchWeather>()
@@ -250,8 +318,9 @@ class RugbyCascadeClient {
             if (cityOrVenue.isBlank()) continue
             val dayPart = RugbyDateUtils.inferDayPart(m.timestampSec, m.timeArg)
             val cacheKey = "${cityOrVenue.lowercase()}_${dayPart.name}"
+            val forceFresh = m.id == bypassCacheForMatchId || PreMatchWindowUseCase.isInsideThirtyMinuteWindow(m, nowMs)
             val cached = weatherCache[cacheKey]
-            if (cached != null && (nowMs - cached.first) < 12 * 60_000L) {
+            if (!forceFresh && cached != null && (nowMs - cached.first) < 12 * 60_000L) {
                 weatherByMatchId[m.id] = cached.second
                 continue
             }

@@ -5,6 +5,7 @@ import com.rugbypro.app.domain.model.AppConfig
 import com.rugbypro.app.domain.model.RugbyDashboard
 import com.rugbypro.app.domain.repository.RugbyRepository
 import com.rugbypro.app.domain.usecase.DetectKeyLiveEventsUseCase
+import com.rugbypro.app.domain.usecase.PreMatchWindowUseCase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -31,7 +32,12 @@ class LiveMatchTracker(
                 runCatching {
                     val prevMatches = getCurrentDashboard()?.matches.orEmpty()
                     val cfg = getConfig()
-                    val nextDash = repository.syncWithCascade(forceLiveRefresh = false)
+                    val nowMs = System.currentTimeMillis()
+                    val preMatchNow = prevMatches.firstOrNull { PreMatchWindowUseCase.isInsideThirtyMinuteWindow(it, nowMs) }
+                    val nextDash = repository.syncWithCascade(
+                        forceLiveRefresh = preMatchNow != null,
+                        forcePreMatchId = preMatchNow?.id
+                    )
                     val alerts = DetectKeyLiveEventsUseCase.execute(
                         previous = prevMatches,
                         current = nextDash.matches,

@@ -20,6 +20,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -40,6 +42,7 @@ import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.NightsStay
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Gavel
 import androidx.compose.material.icons.outlined.SportsRugby
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.Thunderstorm
@@ -53,6 +56,8 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -84,6 +89,8 @@ import com.rugbypro.app.domain.model.MatchEvent
 import com.rugbypro.app.domain.model.MatchEventType
 import com.rugbypro.app.domain.model.MatchStatus
 import com.rugbypro.app.domain.model.MatchDayPart
+import com.rugbypro.app.domain.model.MatchOfficial
+import com.rugbypro.app.domain.model.PlayerProfile
 import com.rugbypro.app.domain.model.MatchWeather
 import com.rugbypro.app.domain.model.RugbyMatch
 import com.rugbypro.app.domain.model.TeamKit
@@ -394,6 +401,171 @@ private fun PlayerAvatarPlaceholder(initials: String) {
     }
 }
 
+
+/**
+ * Retrato 4x4 estilo transmisión televisiva (óvalo o círculo) con el rostro del jugador
+ * y los hombros/cuello de la camiseta oficial puesta (Titular por defecto o Suplente).
+ */
+@Composable
+fun BroadcastPlayerMedallion(
+    photoUrl: String?,
+    playerName: String,
+    kit: TeamKit?,
+    jerseyNumber: String = "",
+    isCaptain: Boolean = false,
+    size: Dp = 74.dp,
+    isOval: Boolean = true,
+    modifier: Modifier = Modifier
+) {
+    val shape = if (isOval) RoundedCornerShape(percent = 48) else CircleShape
+    val width = if (isOval) size * 0.86f else size
+    val primary = parseColorOrNull(kit?.primaryHex)
+    val secondary = parseColorOrNull(kit?.secondaryHex) ?: Color.White
+    val pattern = kit?.pattern ?: "solid"
+    val borderCol = when {
+        isCaptain -> MetallicGold
+        primary != null -> primary.copy(alpha = 0.9f)
+        else -> MaterialTheme.colorScheme.outline
+    }
+
+    Box(
+        modifier = modifier
+            .width(width)
+            .height(size)
+            .semantics {
+                contentDescription = "Retrato 4x4 de $playerName" +
+                    if (kit != null && kit.verified) " con camiseta ${kit.label}" else ""
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(shape)
+                .border(if (isCaptain) 2.dp else 1.5.dp, borderCol, shape)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            (primary ?: Color(0xFF1A2636)).copy(alpha = 0.36f),
+                            PitchDarkBg.copy(alpha = 0.94f)
+                        )
+                    )
+                )
+        ) {
+            val cleanPhoto = photoUrl?.trim().orEmpty()
+            if (cleanPhoto.isNotBlank()) {
+                SubcomposeAsyncImage(
+                    model = cleanPhoto,
+                    contentDescription = playerName,
+                    contentScale = ContentScale.Crop,
+                    alignment = Alignment.TopCenter,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(size * 0.78f)
+                        .align(Alignment.TopCenter),
+                    loading = {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Outlined.Person,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.4f),
+                                modifier = Modifier.size(size * 0.34f)
+                            )
+                        }
+                    },
+                    error = {
+                        SilhouetteHead(size = size)
+                    }
+                )
+            } else {
+                SilhouetteHead(size = size, modifier = Modifier.align(Alignment.TopCenter))
+            }
+
+            // Hombros y cuello de camiseta oficial (Titular o Suplente)
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(size * 0.38f)
+                    .align(Alignment.BottomCenter)
+            ) {
+                val w = this.size.width
+                val h = this.size.height
+                val jerseyFill = primary ?: Color(0xFF1E293B)
+                val collarAccent = if (primary != null) secondary else Color(0xFF94A3B8)
+
+                val shoulders = Path().apply {
+                    moveTo(0f, h)
+                    lineTo(0f, h * 0.54f)
+                    quadraticTo(w * 0.14f, h * 0.10f, w * 0.34f, h * 0.08f)
+                    lineTo(w * 0.50f, h * 0.34f)
+                    lineTo(w * 0.66f, h * 0.08f)
+                    quadraticTo(w * 0.86f, h * 0.10f, w, h * 0.54f)
+                    lineTo(w, h)
+                    close()
+                }
+                drawPath(path = shoulders, color = jerseyFill)
+
+                when (pattern) {
+                    "hoops" -> {
+                        drawRect(
+                            color = collarAccent.copy(alpha = 0.92f),
+                            topLeft = Offset(0f, h * 0.55f),
+                            size = androidx.compose.ui.geometry.Size(w, h * 0.22f)
+                        )
+                    }
+                    "stripes" -> {
+                        drawRect(color = collarAccent, topLeft = Offset(w * 0.22f, h * 0.18f), size = androidx.compose.ui.geometry.Size(w * 0.11f, h * 0.82f))
+                        drawRect(color = collarAccent, topLeft = Offset(w * 0.67f, h * 0.18f), size = androidx.compose.ui.geometry.Size(w * 0.11f, h * 0.82f))
+                    }
+                    "sash" -> {
+                        drawLine(color = collarAccent, start = Offset(w * 0.16f, h * 0.20f), end = Offset(w * 0.84f, h), strokeWidth = w * 0.14f)
+                    }
+                    "split" -> {
+                        drawRect(color = collarAccent, topLeft = Offset(w * 0.50f, h * 0.10f), size = androidx.compose.ui.geometry.Size(w * 0.50f, h * 0.90f))
+                    }
+                }
+
+                drawLine(color = collarAccent, start = Offset(w * 0.33f, h * 0.09f), end = Offset(w * 0.50f, h * 0.36f), strokeWidth = 3.2f)
+                drawLine(color = collarAccent, start = Offset(w * 0.67f, h * 0.09f), end = Offset(w * 0.50f, h * 0.36f), strokeWidth = 3.2f)
+            }
+        }
+
+        if (jerseyNumber.isNotBlank() && jerseyNumber != "-") {
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = PitchDarkBg.copy(alpha = 0.92f),
+                border = BorderStroke(1.dp, if (isCaptain) MetallicGold else PitchGreen.copy(alpha = 0.85f)),
+                modifier = Modifier.align(Alignment.BottomEnd)
+            ) {
+                Text(
+                    text = if (isCaptain) "#$jerseyNumber C" else "#$jerseyNumber",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isCaptain) MetallicGold else Color(0xFFF5F5F5),
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SilhouetteHead(size: Dp, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(size * 0.72f),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.Person,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.65f),
+            modifier = Modifier.size(size * 0.42f)
+        )
+    }
+}
+
 private fun parseColorOrNull(hex: String?): Color? {
     if (hex.isNullOrBlank()) return null
     val c = hex.trim().removePrefix("#")
@@ -696,8 +868,9 @@ fun MatchScoreCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                val refSuffix = if (match.refereeName.isNotBlank()) " · Árb: ${match.refereeName.substringBefore(" (")}" else ""
                 Text(
-                    text = venueText.ifBlank { "Sede: Sin datos disponibles" },
+                    text = (venueText.ifBlank { "Sede por confirmar" }) + refSuffix,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -1141,5 +1314,226 @@ private fun StatCompareRow(label: String, homeVal: Int?, awayVal: Int?, suffix: 
                 .height(6.dp)
                 .clip(RoundedCornerShape(4.dp))
         )
+    }
+}
+
+
+@Composable
+fun MatchOfficialsCard(
+    refereeName: String,
+    officials: List<MatchOfficial>
+) {
+    GlassCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Outlined.Gavel,
+                contentDescription = "Árbitro y autoridades",
+                tint = MetallicGold,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(Modifier.width(Spacing.sm))
+            Text(
+                text = "Árbitro y Autoridades",
+                style = MaterialTheme.typography.titleMedium,
+                color = MetallicGold
+            )
+        }
+        Spacer(Modifier.height(Spacing.sm))
+        if (officials.isEmpty() && refereeName.isBlank()) {
+            Text(
+                text = "Árbitro por confirmar (se actualiza automáticamente 30 min antes del inicio).",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else if (officials.isEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Árbitro principal", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(refereeName, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = PitchGreen)
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                officials.forEach { off ->
+                    val isMain = off.role.contains("principal", ignoreCase = true)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = off.role,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = if (off.country.isNotBlank()) "${off.name} (${off.country})" else off.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (isMain) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isMain) PitchGreen else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun MatchLineupShowcaseCard(
+    match: RugbyMatch,
+    selectedSide: String,
+    onSelectSide: (String) -> Unit,
+    onSelectPlayer: (isHome: Boolean, player: PlayerProfile) -> Unit
+) {
+    val isHome = selectedSide == "home"
+    val players = if (isHome) match.homeLineup else match.awayLineup
+    val activeKit = if (isHome) match.homeKit else match.awayKit
+    val roleLabel = if (isHome) match.homeActiveKitRole.label else match.awayActiveKitRole.label
+    val teamName = if (isHome) match.homeName else match.awayName
+
+    GlassCard {
+        Text(
+            text = "Plantel en Cancha · Retratos 4×4",
+            style = MaterialTheme.typography.titleMedium,
+            color = PitchGreen
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "$teamName · Camiseta: $roleLabel",
+            style = MaterialTheme.typography.labelSmall,
+            color = MetallicGold
+        )
+        Spacer(Modifier.height(Spacing.sm))
+        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            FilterChip(
+                selected = isHome,
+                onClick = { onSelectSide("home") },
+                label = { Text(match.homeAbbr.ifBlank { match.homeName.take(12) }) },
+                colors = FilterChipDefaults.filterChipColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+                    labelColor = MaterialTheme.colorScheme.onSurface,
+                    selectedContainerColor = PitchGreen.copy(alpha = 0.24f),
+                    selectedLabelColor = PitchGreen
+                ),
+                modifier = Modifier.heightIn(min = 48.dp)
+            )
+            FilterChip(
+                selected = !isHome,
+                onClick = { onSelectSide("away") },
+                label = { Text(match.awayAbbr.ifBlank { match.awayName.take(12) }) },
+                colors = FilterChipDefaults.filterChipColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+                    labelColor = MaterialTheme.colorScheme.onSurface,
+                    selectedContainerColor = MetallicGold.copy(alpha = 0.24f),
+                    selectedLabelColor = MetallicGold
+                ),
+                modifier = Modifier.heightIn(min = 48.dp)
+            )
+        }
+        Spacer(Modifier.height(Spacing.sm))
+        if (players.isEmpty()) {
+            Text(
+                text = "Plantel oficial por confirmar (se precarga 30 min antes del inicio).",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            return@GlassCard
+        }
+
+        val starters = players.filter { it.starter }.ifEmpty { players.take(15) }
+        val subs = players.filter { !it.starter }
+
+        Text("Titulares (${starters.size})", style = MaterialTheme.typography.labelMedium, color = ElectricCyan, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(Spacing.sm))
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            maxItemsInEachRow = 3
+        ) {
+            starters.forEach { p ->
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .width(90.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onSelectPlayer(isHome, p) }
+                        .padding(4.dp)
+                ) {
+                    BroadcastPlayerMedallion(
+                        photoUrl = p.photoUrl,
+                        playerName = p.name,
+                        kit = activeKit,
+                        jerseyNumber = p.jersey,
+                        isCaptain = p.captain,
+                        size = 70.dp,
+                        isOval = true
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = p.name.substringAfterLast(" ").ifBlank { p.name },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = p.posCode.ifBlank { p.position.take(10) },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+
+        if (subs.isNotEmpty()) {
+            Spacer(Modifier.height(Spacing.md))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+            Spacer(Modifier.height(Spacing.sm))
+            Text("Suplentes (${subs.size})", style = MaterialTheme.typography.labelMedium, color = MetallicGold, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(Spacing.sm))
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                maxItemsInEachRow = 3
+            ) {
+                subs.forEach { p ->
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .width(90.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onSelectPlayer(isHome, p) }
+                            .padding(4.dp)
+                    ) {
+                        BroadcastPlayerMedallion(
+                            photoUrl = p.photoUrl,
+                            playerName = p.name,
+                            kit = activeKit,
+                            jerseyNumber = p.jersey,
+                            isCaptain = p.captain,
+                            size = 64.dp,
+                            isOval = true
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = p.name.substringAfterLast(" ").ifBlank { p.name },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
+        }
     }
 }

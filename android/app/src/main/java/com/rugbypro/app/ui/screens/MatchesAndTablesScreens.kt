@@ -53,6 +53,7 @@ import com.rugbypro.app.R
 import com.rugbypro.app.domain.model.ActiveKitRole
 import com.rugbypro.app.domain.model.AppSection
 import com.rugbypro.app.domain.model.MatchStatus
+import com.rugbypro.app.domain.model.PlayerProfile
 import com.rugbypro.app.domain.model.RugbyMatch
 import com.rugbypro.app.ui.RugbyUiState
 import com.rugbypro.app.ui.RugbyViewModel
@@ -60,6 +61,8 @@ import com.rugbypro.app.ui.components.GlassCard
 import com.rugbypro.app.ui.components.LiveStatsSection
 import com.rugbypro.app.domain.usecase.RugbyDateUtils
 import com.rugbypro.app.ui.components.EmptyLiveMatchesCard
+import com.rugbypro.app.ui.components.MatchLineupShowcaseCard
+import com.rugbypro.app.ui.components.MatchOfficialsCard
 import com.rugbypro.app.ui.components.MatchScoreCard
 import com.rugbypro.app.ui.components.MatchWeatherCard
 import com.rugbypro.app.ui.components.MatchTimelineSection
@@ -250,7 +253,7 @@ fun FixtureResultsScreen(
                 OutlinedTextField(
                     value = state.fixtureDateQuery,
                     onValueChange = { viewModel.setFixtureFilter(dateQuery = it) },
-                    label = { Text("Fecha (ej. 26/11)") },
+                    label = { Text("Fecha (ej. 26/11/2026)") },
                     singleLine = true,
                     colors = rugbyFieldColors(),
                     modifier = Modifier.weight(1f)
@@ -480,8 +483,10 @@ fun StandingsScreen(
 @Composable
 fun MatchDetailDialog(
     match: RugbyMatch,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onSelectPlayer: (isHome: Boolean, player: PlayerProfile) -> Unit = { _, _ -> }
 ) {
+    var lineupSide by remember(match.id) { mutableStateOf("home") }
     val localKickoff = RugbyDateUtils.formatLocalKickoff(match.timestampSec, match.dateArg)
     val dayPart = match.weather?.dayPart ?: RugbyDateUtils.inferDayPart(match.timestampSec, match.timeArg)
     val isDraw = match.homeScore != null && match.awayScore != null && match.homeScore == match.awayScore &&
@@ -666,6 +671,18 @@ fun MatchDetailDialog(
                             }
                         }
                     }
+
+                    MatchOfficialsCard(
+                        refereeName = match.refereeName,
+                        officials = match.officials
+                    )
+
+                    MatchLineupShowcaseCard(
+                        match = match,
+                        selectedSide = lineupSide,
+                        onSelectSide = { lineupSide = it },
+                        onSelectPlayer = onSelectPlayer
+                    )
 
                     Text("Cronología del partido", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
                     MatchTimelineSection(match.events)

@@ -97,6 +97,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.rugbypro.app.R
 import com.rugbypro.app.domain.model.AppSection
+import com.rugbypro.app.domain.usecase.RugbyDateUtils
 import com.rugbypro.app.ui.RugbyUiState
 import com.rugbypro.app.ui.RugbyViewModel
 import com.rugbypro.app.ui.components.DashboardSkeletonList
@@ -338,7 +339,8 @@ fun RugbyProRoot(
         state.selectedMatchDetail?.let { match ->
             MatchDetailDialog(
                 match = match,
-                onDismiss = { viewModel.openMatchDetail(null) }
+                onDismiss = { viewModel.openMatchDetail(null) },
+                onSelectPlayer = { isHome, player -> viewModel.openPlayerFromMatch(match, isHome, player) }
             )
         }
 
@@ -695,7 +697,7 @@ fun HomeScreen(
                     Text(art.title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                     if (art.publishedLabel.isNotBlank()) {
                         Spacer(Modifier.height(4.dp))
-                        Text(art.publishedLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(RugbyDateUtils.normalizeDisplayDate(art.publishedLabel), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }

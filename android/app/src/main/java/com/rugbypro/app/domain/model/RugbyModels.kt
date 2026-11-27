@@ -83,6 +83,12 @@ data class PreMatchScheduleTarget(
     val triggerAtMs: Long
 )
 
+data class MatchOfficial(
+    val name: String,
+    val role: String,
+    val country: String = ""
+)
+
 data class TeamKit(
     val verified: Boolean = true,
     val primaryHex: String,
@@ -165,7 +171,11 @@ data class RugbyMatch(
     val awayActiveKitRole: ActiveKitRole = ActiveKitRole.UNKNOWN,
     val weather: MatchWeather? = null,
     val statusNote: String? = null,
-    val isExtraTime: Boolean = false
+    val isExtraTime: Boolean = false,
+    val refereeName: String = "",
+    val officials: List<MatchOfficial> = emptyList(),
+    val homeLineup: List<PlayerProfile> = emptyList(),
+    val awayLineup: List<PlayerProfile> = emptyList()
 )
 
 data class CompetitionItem(
@@ -246,7 +256,8 @@ data class PlayerSearchEntry(
     val teamName: String,
     val teamCrestUrl: String,
     val teamFlagUrl: String,
-    val player: PlayerProfile
+    val player: PlayerProfile,
+    val teamKit: TeamKit? = null
 )
 
 data class WorldRankingRow(

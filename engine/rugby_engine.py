@@ -463,15 +463,13 @@ def format_arg_times(utc_dt: dt.datetime | None) -> dict:
     if not utc_dt:
         return {"dateUtc": "", "dateArg": "Por confirmar", "dayArg": "", "timeArg": "", "ts": 0}
     arg_dt = utc_dt.astimezone(ARG_TZ)
-    dias = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
-    meses = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
-    day_str = f"{dias[arg_dt.weekday()]} {arg_dt.day:02d} {meses[arg_dt.month - 1]}"
+    day_str = f"{arg_dt.day:02d}/{arg_dt.month:02d}/{arg_dt.year}"
     time_str = f"{arg_dt.hour:02d}:{arg_dt.minute:02d}"
     return {
         "dateUtc": utc_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "dateArg": f"{day_str} · {time_str} ART",
+        "dateArg": f"{day_str} · {time_str}",
         "dayArg": day_str,
-        "timeArg": f"{time_str} ART",
+        "timeArg": time_str,
         "ts": int(utc_dt.timestamp()),
     }
 
@@ -1325,7 +1323,7 @@ def apply_team_meta_and_log(matches: list[dict], conn: sqlite3.Connection, ranki
             "leagues": lgs,
             "compIds": sorted(team_comps.get(nk, set())),
             "roster": r_info["lineup"] if r_info else [],
-            "rosterUpdated": r_info["eventDate"][:10] if r_info else "",
+            "rosterUpdated": (f"{r_info['eventDate'][8:10]}/{r_info['eventDate'][5:7]}/{r_info['eventDate'][:4]}" if r_info and len(r_info.get("eventDate", "")) >= 10 else ""),
             "isArgentina": ("argentina" in nk or nk in ("newman", "hindu", "sic", "casi", "belgrano ac", "cuba", "alumni", "regatas bella vista", "b.a.c.r.c.", "san luis", "champagnat", "club atletico del rosario", "pampas", "dogos xv", "tarucas", "capibaras xv")),
         })
     directory.sort(key=lambda x: (0 if x["isArgentina"] else 1, x["worldRank"] or 999, 0 if x["roster"] else 1, x["name"]))

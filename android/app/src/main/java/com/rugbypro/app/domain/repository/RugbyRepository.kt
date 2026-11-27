@@ -9,7 +9,7 @@ interface RugbyRepository {
     fun observeConfig(): Flow<AppConfig>
     suspend fun updateConfig(transform: (AppConfig) -> AppConfig)
     suspend fun loadInitialDashboard(): RugbyDashboard
-    suspend fun syncWithCascade(forceLiveRefresh: Boolean = true): RugbyDashboard
+    suspend fun syncWithCascade(forceLiveRefresh: Boolean = true, forcePreMatchId: String? = null): RugbyDashboard
     suspend fun toggleSavedNews(article: NewsArticle): List<NewsArticle>
     suspend fun getSavedNews(): List<NewsArticle>
     suspend fun hasNotifiedEvent(key: String): Boolean

@@ -1163,7 +1163,8 @@
         <div class="sheet-section">
           <h3>Estadio, Horario y Autoridades</h3>
           <div class="player-row"><span>Competencia</span><span style="font-weight:600;">${esc(m.leagueName)}${m.phase ? ` · ${esc(m.phase)}` : ''}</span></div>
-          <div class="player-row"><span>Fecha y Hora (ARG)</span><span class="mono-num" style="color:var(--gold);">${esc(m.dateArg || 'Por confirmar')}</span></div>
+          <div class="player-row"><span>Fecha y Hora</span><span class="mono-num" style="color:var(--gold);">${esc(m.dateArg || 'Por confirmar')}</span></div>
+          ${(m.officials && m.officials.length) ? `<div class="player-row"><span>Árbitro principal</span><span>${esc((m.officials.find(o => /referee/i.test(o.role) && !/assistant|tmo|video/i.test(o.role)) || m.officials[0]).name)}</span></div>` : ''}
           <div class="player-row"><span>Estadio / Ciudad</span><span>${esc([m.venue && m.venue.name, m.venue && m.venue.city].filter(Boolean).join(', ') || 'Sede oficial')}</span></div>
         </div>
         ${totalOfficials ? `

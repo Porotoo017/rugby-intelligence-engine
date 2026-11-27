@@ -133,7 +133,7 @@ class RugbyViewModel(app: Application) : AndroidViewModel(app) {
 
             val allEntries = teamsWithRoster.flatMap { t ->
                 t.roster.map { p ->
-                    PlayerSearchEntry(t.key, t.name, t.crestUrl, p.nationalityFlagUrl ?: t.flagUrl, p)
+                    PlayerSearchEntry(t.key, t.name, t.crestUrl, p.nationalityFlagUrl ?: t.flagUrl, p, t.homeKit ?: t.awayKit)
                 }
             }
             val pA = cur.comparePlayerA ?: allEntries.firstOrNull { it.teamName.contains("Argentina", true) } ?: allEntries.firstOrNull()
@@ -258,7 +258,27 @@ class RugbyViewModel(app: Application) : AndroidViewModel(app) {
                     teamName = team.name,
                     teamCrestUrl = team.crestUrl,
                     teamFlagUrl = player.nationalityFlagUrl ?: team.flagUrl,
-                    player = player
+                    player = player,
+                    teamKit = team.homeKit ?: team.awayKit
+                )
+            )
+        }
+    }
+
+    fun openPlayerFromMatch(match: RugbyMatch, isHome: Boolean, player: PlayerProfile) {
+        val tName = if (isHome) match.homeName else match.awayName
+        val tCrest = if (isHome) match.homeCrestUrl else match.awayCrestUrl
+        val tFlag = player.nationalityFlagUrl ?: if (isHome) match.homeFlagUrl else match.awayFlagUrl
+        val kit = if (isHome) match.homeKit else match.awayKit
+        _uiState.update {
+            it.copy(
+                selectedPlayer = PlayerSearchEntry(
+                    teamKey = tName.lowercase(),
+                    teamName = tName,
+                    teamCrestUrl = tCrest,
+                    teamFlagUrl = tFlag,
+                    player = player,
+                    teamKit = kit
                 )
             )
         }
