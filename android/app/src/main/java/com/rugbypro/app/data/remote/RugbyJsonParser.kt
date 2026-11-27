@@ -1310,7 +1310,7 @@ object RugbyJsonParser {
             val id = "wr_${lang}_${c.optString("id", title.hashCode().toString())}"
             val rawSummary = c.optString("description", c.optString("summary", c.optString("subtitle", title)))
                 .replace(Regex("<[^>]+>"), " ")
-                .replace(Regex("\s+"), " ")
+                .replace(Regex("\\s+"), " ")
                 .trim()
                 .ifBlank { title }
             val lm = c.optJSONObject("leadMedia")
@@ -1359,16 +1359,17 @@ object RugbyJsonParser {
 
     fun parseRssNews(xmlStr: String, sourceName: String, defaultCategory: String = "Internacional"): List<NewsArticle> {
         val out = mutableListOf<NewsArticle>()
-        val itemRegex = Regex("<item\b[^>]*>(.*?)</item>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+        val itemRegex = Regex("<item\\b[^>]*>(.*?)</item>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+        val imgRegex = Regex("""(?:url|src)=["'](https?://[^"']+\.(?:jpg|jpeg|png|webp)[^"']*)["']""", RegexOption.IGNORE_CASE)
         fun extractTag(block: String, tag: String): String {
-            val r = Regex("<$tag[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/$tag>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+            val r = Regex("<$tag[^>]*>(?:<!\\[CDATA\\[)?(.*?)(?:\\]\\]>)?<\\/$tag>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
             return r.find(block)?.groupValues?.getOrNull(1)
                 ?.replace(Regex("<[^>]+>"), " ")
                 ?.replace("&amp;", "&")
-                ?.replace("&quot;", """)
+                ?.replace("&quot;", "\"")
                 ?.replace("&#39;", "'")
                 ?.replace("&apos;", "'")
-                ?.replace(Regex("\s+"), " ")
+                ?.replace(Regex("\\s+"), " ")
                 ?.trim()
                 .orEmpty()
         }
@@ -1380,8 +1381,7 @@ object RugbyJsonParser {
             val link = extractTag(block, "link")
             val desc = extractTag(block, "description").ifBlank { title }
             val pubDate = extractTag(block, "pubDate")
-            val imgMatch = Regex("""(?:url|src)=["'](https?://[^"']+\.(?:jpg|jpeg|png|webp)[^"']*)["']""", RegexOption.IGNORE_CASE).find(block)
-            val imgUrl = imgMatch?.groupValues?.getOrNull(1).orEmpty()
+            val imgUrl = imgRegex.find(block)?.groupValues?.getOrNull(1).orEmpty()
             val zdt = runCatching {
                 java.time.ZonedDateTime.parse(pubDate, DateTimeFormatter.RFC_1123_DATE_TIME).withZoneSameInstant(artZone)
             }.getOrNull()
