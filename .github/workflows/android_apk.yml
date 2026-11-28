@@ -36,9 +36,25 @@ jobs:
         working-directory: android
         run: gradle testDebugUnitTest --no-daemon
 
+      - name: Decode Permanent Release Keystore
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_B64" ]; then
+            echo "$ANDROID_KEYSTORE_B64" | base64 -d > android/app/rugby-release.p12
+            keytool -list -keystore android/app/rugby-release.p12 -storetype PKCS12 -storepass "$ANDROID_KEYSTORE_PASS"
+          fi
+
       - name: Build Signed Release APK (R8 Shrunk)
         working-directory: android
+        env:
+          ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
         run: gradle assembleRelease --no-daemon
+
+      - name: Clean Ephemeral Keystore File
+        if: always()
+        run: rm -f android/app/rugby-release.p12
 
       - name: Package Release APK
         run: cp android/app/build/outputs/apk/release/app-release.apk Rugby-Pro-Max.apk

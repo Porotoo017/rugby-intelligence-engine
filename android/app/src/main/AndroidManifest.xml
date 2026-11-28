@@ -28,7 +28,7 @@
             android:enabled="true"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.rugbypro.app.ACTION_PREMATCH_PRELOAD" />
+                <action android:name="com.rugbypro.max.ACTION_PREMATCH_PRELOAD" />
             </intent-filter>
         </receiver>
     </application>

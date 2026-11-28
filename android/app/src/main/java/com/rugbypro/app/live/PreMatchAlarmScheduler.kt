@@ -24,7 +24,7 @@ object PreMatchAlarmScheduler {
                 continue
             }
             val intent = Intent(context, PreMatchAlarmReceiver::class.java).apply {
-                action = "com.rugbypro.app.ACTION_PREMATCH_PRELOAD"
+                action = "com.rugbypro.max.ACTION_PREMATCH_PRELOAD"
                 putExtra(EXTRA_MATCH_ID, t.matchId)
             }
             val requestCode = abs(t.matchId.hashCode())

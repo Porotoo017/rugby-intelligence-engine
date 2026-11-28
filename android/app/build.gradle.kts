@@ -10,22 +10,40 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.rugbypro.app"
+        applicationId = "com.rugbypro.max"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "4.0.1-Pro"
+        versionCode = 1
+        versionName = "4.0.2-Pro"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
         }
     }
 
+    signingConfigs {
+        create("release") {
+            val ksFile = file("rugby-release.p12")
+            val ksPass = System.getenv("ANDROID_KEYSTORE_PASS")
+            if (ksFile.exists() && !ksPass.isNullOrBlank()) {
+                storeFile = ksFile
+                storeType = "PKCS12"
+                storePassword = ksPass
+                keyAlias = "rugbypro"
+                keyPassword = ksPass
+            }
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("debug")
+            val relKs = file("rugby-release.p12")
+            signingConfig = if (relKs.exists() && !System.getenv("ANDROID_KEYSTORE_PASS").isNullOrBlank()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
