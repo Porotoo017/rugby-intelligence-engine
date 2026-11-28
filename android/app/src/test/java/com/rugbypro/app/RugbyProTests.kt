@@ -430,42 +430,14 @@ class RugbyProTests {
 
     @Test
     fun `cross verify never downgrades live score and keeps fresher clock`() {
-        val primary = RugbyMatch(
-            id = "wr_100",
-            source = "official_live",
-            leagueId = "mrs",
-            leagueName = "SVNS",
-            leagueShort = "SVNS",
-            phase = "Final",
-            group = "sevens",
-            category = "Selecciones",
-            status = MatchStatus.LIVE,
+        val nowSec = System.currentTimeMillis() / 1000L
+        val primary = sampleMatch("wr_100", "official_live", MatchStatus.LIVE, 28, 19, tsSec = nowSec).copy(
             minuteDisplay = "46:00",
-            periodDisplay = "2do Tiempo",
-            dateArg = "28/11/2026 · 10:00",
-            dayArg = "28/11/2026",
-            timeArg = "10:00",
-            timestampSec = System.currentTimeMillis() / 1000L,
-            venueName = "Dubai",
-            venueCity = "Dubai",
-            homeName = "Argentina 7s",
-            homeAbbr = "ARG",
-            homeCrestUrl = "",
-            homeFlagUrl = "",
-            awayName = "Fiji 7s",
-            awayAbbr = "FIJ",
-            awayCrestUrl = "",
-            awayFlagUrl = "",
-            homeScore = 28,
-            awayScore = 19,
-            isArgentina = true,
             clockSeconds = 2760,
             clockSyncedAtMs = 1000L,
             clockRunning = true
         )
-        val laggingPeer = primary.copy(
-            homeScore = 21,
-            awayScore = 12,
+        val laggingPeer = sampleMatch("wr:100", "official_live", MatchStatus.LIVE, 21, 12, tsSec = nowSec).copy(
             minuteDisplay = "12:10",
             clockSeconds = 730,
             clockSyncedAtMs = 2000L,
