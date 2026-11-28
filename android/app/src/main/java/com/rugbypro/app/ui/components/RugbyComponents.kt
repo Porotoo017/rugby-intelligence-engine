@@ -39,7 +39,9 @@ import androidx.compose.material.icons.outlined.AcUnit
 import androidx.compose.material.icons.outlined.Air
 import androidx.compose.material.icons.outlined.Cancel
 import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.Newspaper
 import androidx.compose.material.icons.outlined.NightsStay
+import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Gavel
@@ -62,7 +64,11 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -83,6 +89,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.SubcomposeAsyncImage
+import com.rugbypro.app.data.remote.RugbyJsonParser
 import com.rugbypro.app.domain.model.ActiveKitRole
 import com.rugbypro.app.domain.model.LiveMatchStats
 import com.rugbypro.app.domain.model.MatchEvent
@@ -105,6 +112,7 @@ import com.rugbypro.app.ui.theme.PendingAmber
 import com.rugbypro.app.ui.theme.PitchDarkBg
 import com.rugbypro.app.ui.theme.PitchGreen
 import com.rugbypro.app.ui.theme.Spacing
+import kotlinx.coroutines.delay
 
 @Composable
 fun GlassCard(
@@ -232,6 +240,31 @@ fun SectionBackdropBanner(
 }
 
 @Composable
+fun rememberLiveMatchClock(match: RugbyMatch): String {
+    var nowMs by remember(match.id, match.clockSeconds, match.clockSyncedAtMs, match.clockRunning) {
+        mutableLongStateOf(System.currentTimeMillis())
+    }
+    LaunchedEffect(match.id, match.status, match.clockRunning, match.clockSeconds, match.clockSyncedAtMs) {
+        if (match.status == MatchStatus.LIVE && match.clockRunning && match.clockSeconds != null) {
+            while (true) {
+                nowMs = System.currentTimeMillis()
+                delay(1_000L)
+            }
+        }
+    }
+    if (match.status != MatchStatus.LIVE) return match.minuteDisplay
+    if (!match.clockRunning) {
+        return match.minuteDisplay.ifBlank {
+            if (match.periodDisplay.contains("entretiempo", ignoreCase = true)) "Entretiempo" else ""
+        }
+    }
+    val baseSecs = match.clockSeconds ?: return match.minuteDisplay
+    val syncAt = if (match.clockSyncedAtMs > 0L) match.clockSyncedAtMs else nowMs
+    val deltaSec = ((nowMs - syncAt).coerceAtLeast(0L) / 1000L).toInt().coerceAtMost(180)
+    return RugbyJsonParser.formatClockMmSs(baseSecs + deltaSec)
+}
+
+@Composable
 fun PulsingLiveIndicator(label: String = "EN VIVO") {
     val inf = rememberInfiniteTransition(label = "livePulse")
     val alpha by inf.animateFloat(
@@ -241,9 +274,9 @@ fun PulsingLiveIndicator(label: String = "EN VIVO") {
         label = "pulseAlpha"
     )
     Surface(
-        color = LiveCrimson.copy(alpha = 0.16f),
-        shape = RoundedCornerShape(999.dp),
-        border = BorderStroke(1.dp, LiveCrimson.copy(alpha = 0.65f)),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f),
+        border = BorderStroke(1.dp, LiveCrimson.copy(alpha = 0.55f)),
         modifier = Modifier.semantics { contentDescription = "Partido en vivo ahora" }
     ) {
         Row(
@@ -252,7 +285,7 @@ fun PulsingLiveIndicator(label: String = "EN VIVO") {
         ) {
             Box(
                 modifier = Modifier
-                    .size(8.dp)
+                    .size(7.dp)
                     .alpha(alpha)
                     .clip(CircleShape)
                     .background(LiveCrimson)
@@ -260,8 +293,8 @@ fun PulsingLiveIndicator(label: String = "EN VIVO") {
             Spacer(Modifier.width(6.dp))
             Text(
                 text = label,
-                style = MaterialTheme.typography.labelMedium,
-                color = LiveCrimson,
+                style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+                color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Bold
             )
         }
@@ -704,9 +737,10 @@ fun MatchScoreCard(
                 )
             }
             Spacer(Modifier.width(Spacing.sm))
+            val liveClock = rememberLiveMatchClock(match)
             when (match.status) {
                 MatchStatus.LIVE -> PulsingLiveIndicator(
-                    label = if (match.minuteDisplay.isNotBlank()) "EN VIVO · ${match.minuteDisplay}" else "EN VIVO"
+                    label = if (liveClock.isNotBlank()) "EN VIVO · $liveClock" else "EN VIVO"
                 )
                 MatchStatus.FINISHED -> Text(
                     text = if (isDraw) "FINAL · EMPATE" else "FINALIZADO",
@@ -814,7 +848,7 @@ fun MatchScoreCard(
                     ) { scoreText ->
                         Text(
                             text = scoreText,
-                            style = MaterialTheme.typography.displaySmall,
+                            style = MaterialTheme.typography.displaySmall.copy(fontFeatureSettings = "tnum"),
                             color = if (match.status == MatchStatus.LIVE) PitchGreen else MaterialTheme.colorScheme.onSurface
                         )
                     }
@@ -1560,110 +1594,122 @@ fun MatchLiveCoverageSection(
         match.leagueName.contains("svns", true) ||
         match.homeName.contains("7s", true)
 
-    val relatedNews = allNews.filter { art ->
+    val matchedNews = allNews.filter { art ->
         val hay = "${art.title} ${art.summary} ${art.category}".lowercase()
         (homeToken.length >= 4 && homeToken in hay) ||
             (awayToken.length >= 4 && awayToken in hay) ||
             (isSevens && ("svns" in hay || "sevens" in hay || " 7s" in hay || "dubai" in hay)) ||
             (match.leagueShort.length >= 4 && match.leagueShort.lowercase() in hay)
-    }.take(4)
+    }.take(5)
+    val displayNews = matchedNews.ifEmpty { allNews.take(4) }
+    val hasMatched = matchedNews.isNotEmpty()
 
-    val statusHeadline = when (match.status) {
-        MatchStatus.LIVE -> buildString {
-            append("EN VIVO")
-            if (match.periodDisplay.isNotBlank()) append(" · ${match.periodDisplay}")
-            if (match.minuteDisplay.isNotBlank()) append(" (${match.minuteDisplay})")
-            append(" — ${match.homeName} ${match.homeScore ?: 0} : ${match.awayScore ?: 0} ${match.awayName}")
-        }
-        MatchStatus.FINISHED -> "${match.homeName} ${match.homeScore ?: "-"} : ${match.awayScore ?: "-"} ${match.awayName} · Finalizado"
-        MatchStatus.POSTPONED -> "${match.homeName} vs ${match.awayName} · Postergado"
-        MatchStatus.CANCELLED -> "${match.homeName} vs ${match.awayName} · Cancelado"
-        MatchStatus.SCHEDULED -> "${match.homeName} vs ${match.awayName} · Programado (${RugbyDateUtils.formatLocalKickoff(match.timestampSec, match.dateArg)})"
-    }
-
-    GlassCard(highlightAccent = match.status == MatchStatus.LIVE) {
+    GlassCard {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
-            Text(
-                text = "Cobertura en vivo y noticias del evento",
-                style = MaterialTheme.typography.titleMedium,
-                color = if (match.status == MatchStatus.LIVE) PitchGreen else MetallicGold
+            Icon(
+                imageVector = Icons.Outlined.Newspaper,
+                contentDescription = null,
+                tint = MetallicGold,
+                modifier = Modifier.size(20.dp)
             )
-            if (match.status == MatchStatus.LIVE) {
-                PulsingLiveIndicator(label = "MINUTO A MINUTO")
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Noticias del Encuentro",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = if (hasMatched) {
+                        "Cobertura editorial del torneo y protagonistas"
+                    } else {
+                        "Actualidad internacional del rugby"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
-        Spacer(Modifier.height(Spacing.sm))
-        Text(
-            text = statusHeadline,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface
-        )
 
-        if (match.events.isNotEmpty()) {
-            Spacer(Modifier.height(Spacing.sm))
-            val latestEvents = match.events.sortedByDescending { it.minute }.take(5)
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                latestEvents.forEach { ev ->
-                    val sideTeam = if (ev.teamSide == "away") match.awayName else match.homeName
-                    Text(
-                        text = "• ${ev.minute}' · ${ev.type.label} ($sideTeam)${if (ev.player.isNotBlank()) " — ${ev.player}" else ""}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        } else if (match.status == MatchStatus.LIVE) {
-            Spacer(Modifier.height(Spacing.xs))
+        Spacer(Modifier.height(Spacing.md))
+
+        if (displayNews.isEmpty()) {
             Text(
-                text = "Esperando incidencias detalladas del encuentro. La app actualiza automáticamente cada 15 segundos.",
-                style = MaterialTheme.typography.labelMedium,
+                text = if (match.status == MatchStatus.LIVE) {
+                    "Sin notas editoriales vinculadas por el momento. Marcador y cronómetro sincronizan automáticamente cada 5 s."
+                } else {
+                    "Sin noticias recientes asociadas a este encuentro."
+                },
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-        }
-
-        if (relatedNews.isNotEmpty()) {
-            Spacer(Modifier.height(Spacing.md))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
-            Spacer(Modifier.height(Spacing.sm))
-            Text(
-                text = "Noticias del torneo y protagonistas",
-                style = MaterialTheme.typography.labelLarge,
-                color = MetallicGold,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(Modifier.height(Spacing.xs))
+        } else {
             Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                relatedNews.forEach { art ->
-                    Column(
+                displayNews.forEach { art ->
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.50f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.30f)),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                            .clip(RoundedCornerShape(12.dp))
                             .clickable(enabled = art.url.isNotBlank()) {
                                 runCatching { uriHandler.openUri(art.url) }
                             }
-                            .padding(Spacing.sm)
                     ) {
-                        Text(
-                            text = art.title,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (art.publishedLabel.isNotBlank()) {
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                text = art.publishedLabel,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = ElectricCyan
-                            )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(Spacing.sm),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                        ) {
+                            if (art.imageUrl.isNotBlank()) {
+                                SubcomposeAsyncImage(
+                                    model = art.imageUrl,
+                                    contentDescription = art.title,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .size(56.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                val metaLine = listOf(
+                                    art.category.ifBlank { "Rugby" },
+                                    RugbyDateUtils.normalizeDisplayDate(art.publishedLabel)
+                                ).filter { it.isNotBlank() }.joinToString(" · ")
+                                if (metaLine.isNotBlank()) {
+                                    Text(
+                                        text = metaLine,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MetallicGold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(Modifier.height(2.dp))
+                                }
+                                Text(
+                                    text = art.title,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            if (art.url.isNotBlank()) {
+                                Icon(
+                                    imageVector = Icons.Outlined.OpenInNew,
+                                    contentDescription = "Abrir nota",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
                     }
                 }

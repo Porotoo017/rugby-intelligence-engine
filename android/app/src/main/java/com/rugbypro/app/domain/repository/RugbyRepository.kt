@@ -10,6 +10,7 @@ interface RugbyRepository {
     suspend fun updateConfig(transform: (AppConfig) -> AppConfig)
     suspend fun loadInitialDashboard(): RugbyDashboard
     suspend fun syncWithCascade(forceLiveRefresh: Boolean = true, forcePreMatchId: String? = null): RugbyDashboard
+    suspend fun syncLivePulseOnly(currentDashboard: RugbyDashboard?): RugbyDashboard
     suspend fun refreshMatchDetail(match: com.rugbypro.app.domain.model.RugbyMatch): com.rugbypro.app.domain.model.RugbyMatch
     suspend fun toggleSavedNews(article: NewsArticle): List<NewsArticle>
     suspend fun getSavedNews(): List<NewsArticle>

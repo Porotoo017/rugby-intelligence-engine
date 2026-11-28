@@ -18,6 +18,7 @@ import com.rugbypro.app.domain.model.TeamProfile
 import com.rugbypro.app.domain.usecase.ComparePlayersUseCase
 import com.rugbypro.app.domain.usecase.CompareTeamsUseCase
 import com.rugbypro.app.domain.usecase.CrossVerifyMatchesUseCase
+import com.rugbypro.app.domain.usecase.PreMatchWindowUseCase
 import com.rugbypro.app.domain.usecase.FilterLiveAndTodayMatchesUseCase
 import com.rugbypro.app.domain.usecase.FilterMatchesUseCase
 import com.rugbypro.app.domain.usecase.SearchTeamsAndPlayersUseCase
@@ -27,6 +28,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 
@@ -101,6 +105,7 @@ class RugbyViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repository = RugbyRepositoryImpl(app)
     private val tracker = LiveMatchTracker(app, repository)
+    private var detailPollingJob: Job? = null
 
     private val _uiState = MutableStateFlow(RugbyUiState())
     val uiState: StateFlow<RugbyUiState> = _uiState.asStateFlow()
@@ -170,9 +175,33 @@ class RugbyViewModel(app: Application) : AndroidViewModel(app) {
 
             val refreshedSelectedMatch = cur.selectedMatchDetail?.let { sel ->
                 val sig = CrossVerifyMatchesUseCase.matchSignature(sel)
-                dash.matches.firstOrNull { it.id == sel.id }
+                val matched = dash.matches.firstOrNull { it.id == sel.id }
                     ?: dash.matches.firstOrNull { CrossVerifyMatchesUseCase.matchSignature(it) == sig }
-                    ?: sel
+                if (matched == null) {
+                    sel
+                } else {
+                    val useMatchedClock = matched.clockSyncedAtMs >= sel.clockSyncedAtMs
+                    val selTot = (sel.homeScore ?: -1) + (sel.awayScore ?: -1)
+                    val mTot = (matched.homeScore ?: -1) + (matched.awayScore ?: -1)
+                    val keepMatchedScore = matched.status == MatchStatus.FINISHED ||
+                        sel.status != MatchStatus.LIVE ||
+                        (matched.homeScore != null && mTot >= selTot)
+                    matched.copy(
+                        homeScore = if (keepMatchedScore) matched.homeScore else sel.homeScore,
+                        awayScore = if (keepMatchedScore) matched.awayScore else sel.awayScore,
+                        clockSeconds = if (useMatchedClock) (matched.clockSeconds ?: sel.clockSeconds) else sel.clockSeconds,
+                        clockSyncedAtMs = maxOf(matched.clockSyncedAtMs, sel.clockSyncedAtMs),
+                        clockRunning = if (useMatchedClock) matched.clockRunning else sel.clockRunning,
+                        minuteDisplay = if (useMatchedClock) matched.minuteDisplay.ifBlank { sel.minuteDisplay } else sel.minuteDisplay.ifBlank { matched.minuteDisplay },
+                        events = matched.events.ifEmpty { sel.events },
+                        liveStats = if (matched.liveStats?.hasAnyMetric() == true) matched.liveStats else sel.liveStats,
+                        homeLineup = matched.homeLineup.ifEmpty { sel.homeLineup },
+                        awayLineup = matched.awayLineup.ifEmpty { sel.awayLineup },
+                        refereeName = matched.refereeName.ifBlank { sel.refereeName },
+                        officials = matched.officials.ifEmpty { sel.officials },
+                        weather = matched.weather ?: sel.weather
+                    )
+                }
             }
             cur.copy(
                 isLoading = isLoading,
@@ -318,25 +347,39 @@ class RugbyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun openMatchDetail(match: RugbyMatch?) {
+        detailPollingJob?.cancel()
+        detailPollingJob = null
         _uiState.update { it.copy(selectedMatchDetail = match) }
         if (match != null) {
-            viewModelScope.launch {
-                val fresh = runCatching { repository.refreshMatchDetail(match) }.getOrNull() ?: return@launch
-                _uiState.update { cur ->
-                    val currentSel = cur.selectedMatchDetail
-                    val sameOpen = currentSel != null && (currentSel.id == match.id ||
-                        CrossVerifyMatchesUseCase.matchSignature(currentSel) == CrossVerifyMatchesUseCase.matchSignature(match))
-                    val updatedDash = cur.dashboard?.let { d ->
-                        d.copy(
-                            matches = d.matches.map { existing ->
-                                if (existing.id == fresh.id || existing.id == match.id) fresh else existing
-                            }
+            detailPollingJob = viewModelScope.launch {
+                suspend fun pullOnce(target: RugbyMatch) {
+                    val fresh = runCatching { repository.refreshMatchDetail(target) }.getOrNull() ?: return
+                    _uiState.update { cur ->
+                        val currentSel = cur.selectedMatchDetail
+                        val sameOpen = currentSel != null && (currentSel.id == target.id ||
+                            CrossVerifyMatchesUseCase.matchSignature(currentSel) == CrossVerifyMatchesUseCase.matchSignature(target))
+                        val updatedDash = cur.dashboard?.let { d ->
+                            d.copy(
+                                matches = d.matches.map { existing ->
+                                    if (existing.id == fresh.id || existing.id == target.id) fresh else existing
+                                }
+                            )
+                        }
+                        cur.copy(
+                            dashboard = updatedDash ?: cur.dashboard,
+                            selectedMatchDetail = if (sameOpen) fresh else currentSel
                         )
                     }
-                    cur.copy(
-                        dashboard = updatedDash ?: cur.dashboard,
-                        selectedMatchDetail = if (sameOpen) fresh else currentSel
-                    )
+                }
+                pullOnce(match)
+                while (isActive) {
+                    val currentSel = _uiState.value.selectedMatchDetail ?: break
+                    val activeWindow = currentSel.status == MatchStatus.LIVE ||
+                        PreMatchWindowUseCase.isInsideThirtyMinuteWindow(currentSel)
+                    if (!activeWindow) break
+                    delay(5_000L)
+                    val stillSel = _uiState.value.selectedMatchDetail ?: break
+                    pullOnce(stillSel)
                 }
             }
         }
@@ -425,6 +468,7 @@ class RugbyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        detailPollingJob?.cancel()
         tracker.stop()
         super.onCleared()
     }

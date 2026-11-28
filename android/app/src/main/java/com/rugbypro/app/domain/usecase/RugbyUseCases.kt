@@ -74,10 +74,21 @@ object CrossVerifyMatchesUseCase {
                         id = if (m.id.startsWith("wr:") && peer.id.startsWith("wr_")) peer.id else m.id,
                         group = if (peer.group == "sevens" || m.group == "sevens") "sevens" else m.group,
                         status = if (peer.status == MatchStatus.LIVE || peer.status == MatchStatus.FINISHED) peer.status else m.status,
-                        homeScore = peer.homeScore ?: m.homeScore,
-                        awayScore = peer.awayScore ?: m.awayScore,
+                        homeScore = run {
+                            val mTot = (m.homeScore ?: 0) + (m.awayScore ?: 0)
+                            val pTot = (peer.homeScore ?: -1) + (peer.awayScore ?: -1)
+                            if (peer.status == MatchStatus.FINISHED || peer.homeScore != null && (m.status != MatchStatus.LIVE || pTot >= mTot)) peer.homeScore else (m.homeScore ?: peer.homeScore)
+                        },
+                        awayScore = run {
+                            val mTot = (m.homeScore ?: 0) + (m.awayScore ?: 0)
+                            val pTot = (peer.homeScore ?: -1) + (peer.awayScore ?: -1)
+                            if (peer.status == MatchStatus.FINISHED || peer.awayScore != null && (m.status != MatchStatus.LIVE || pTot >= mTot)) peer.awayScore else (m.awayScore ?: peer.awayScore)
+                        },
                         minuteDisplay = peer.minuteDisplay.ifBlank { m.minuteDisplay },
                         periodDisplay = peer.periodDisplay.ifBlank { m.periodDisplay },
+                        clockSeconds = if (peer.clockSyncedAtMs >= m.clockSyncedAtMs && peer.clockSeconds != null) peer.clockSeconds else (peer.clockSeconds ?: m.clockSeconds),
+                        clockSyncedAtMs = maxOf(peer.clockSyncedAtMs, m.clockSyncedAtMs),
+                        clockRunning = if (peer.clockSyncedAtMs >= m.clockSyncedAtMs) peer.clockRunning else m.clockRunning,
                         events = if (peer.events.isNotEmpty()) peer.events else m.events,
                         liveStats = if (peer.liveStats?.hasAnyMetric() == true) peer.liveStats else m.liveStats,
                         weather = m.weather ?: peer.weather,

@@ -39,6 +39,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -69,6 +70,7 @@ import com.rugbypro.app.ui.components.MatchScoreCard
 import com.rugbypro.app.ui.components.MatchWeatherCard
 import com.rugbypro.app.ui.components.MatchTimelineSection
 import com.rugbypro.app.ui.components.PulsingLiveIndicator
+import com.rugbypro.app.ui.components.rememberLiveMatchClock
 import com.rugbypro.app.ui.components.RugbyJerseyBadge
 import com.rugbypro.app.ui.components.SectionBackdropBanner
 import com.rugbypro.app.ui.components.TeamCrestWithFlag
@@ -119,7 +121,7 @@ fun LiveMatchesScreen(
                 backgroundRes = R.drawable.bg_rugby_action,
                 eyebrow = "Tiempo Real",
                 title = "Partidos en vivo",
-                subtitle = "Actualización en tiempo real (${if (live.isNotEmpty()) minOf(state.config.liveRefreshSec, 15) else state.config.liveRefreshSec} s) · Partidos activos y agenda de hoy",
+                subtitle = "Actualización en tiempo real (${if (live.isNotEmpty()) "cada 5 s" else "${state.config.liveRefreshSec} s"}) · Partidos activos y agenda de hoy",
                 trailing = {
                     if (live.isNotEmpty()) PulsingLiveIndicator()
                 }
@@ -184,16 +186,58 @@ fun LiveMatchesScreen(
                 }
             } else {
                 itemsIndexed(live, key = { idx, m -> "live_${idx}_${m.id}" }) { _, m ->
-                    Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                         MatchScoreCard(match = m, favoriteTeam = state.config.favoriteTeam, onClick = { viewModel.openMatchDetail(m) })
-                        GlassCard {
-                            Text("Cronología de eventos", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-                            Spacer(Modifier.height(Spacing.sm))
-                            MatchTimelineSection(m.events)
-                            Spacer(Modifier.height(Spacing.md))
-                            Text("Estadísticas en vivo", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.secondary)
-                            Spacer(Modifier.height(Spacing.sm))
-                            LiveStatsSection(m.liveStats)
+                        val hasEvents = m.events.isNotEmpty()
+                        val hasStats = m.liveStats?.hasAnyMetric() == true
+                        if (hasEvents || hasStats) {
+                            GlassCard(onClick = { viewModel.openMatchDetail(m) }) {
+                                if (hasEvents) {
+                                    Text(
+                                        text = "Últimas incidencias",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MetallicGold,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(Modifier.height(6.dp))
+                                    m.events.sortedByDescending { it.minute }.take(3).forEach { ev ->
+                                        val sideName = if (ev.teamSide == "away") m.awayAbbr.ifBlank { m.awayName } else m.homeAbbr.ifBlank { m.homeName }
+                                        Text(
+                                            text = "${ev.minute}' · ${ev.type.label} ($sideName)${if (ev.player.isNotBlank()) " — ${ev.player}" else ""}",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                                if (hasStats) {
+                                    val st = m.liveStats
+                                    if (st != null) {
+                                        if (hasEvents) Spacer(Modifier.height(Spacing.sm))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            if (st.possessionHomePct != null && st.possessionAwayPct != null) {
+                                                Text(
+                                                    text = "Posesión ${st.possessionHomePct}% - ${st.possessionAwayPct}%",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = ElectricCyan
+                                                )
+                                            }
+                                            if (st.triesHome != null && st.triesAway != null) {
+                                                Text(
+                                                    text = "Tries ${st.triesHome} - ${st.triesAway}",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = PitchGreen,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -485,15 +529,17 @@ fun StandingsScreen(
 @Composable
 fun MatchDetailDialog(
     match: RugbyMatch,
-    news: List<NewsArticle> = emptyList(),
+    news: List<NewsArticle>,
     onDismiss: () -> Unit,
-    onSelectPlayer: (isHome: Boolean, player: PlayerProfile) -> Unit = { _, _ -> }
+    onSelectPlayer: (isHome: Boolean, player: PlayerProfile) -> Unit
 ) {
-    var lineupSide by remember(match.id) { mutableStateOf("home") }
-    val localKickoff = RugbyDateUtils.formatLocalKickoff(match.timestampSec, match.dateArg)
-    val dayPart = match.weather?.dayPart ?: RugbyDateUtils.inferDayPart(match.timestampSec, match.timeArg)
     val isDraw = match.homeScore != null && match.awayScore != null && match.homeScore == match.awayScore &&
         (match.status == MatchStatus.FINISHED || match.status == MatchStatus.LIVE)
+    val dayPart = RugbyDateUtils.inferDayPart(match.timestampSec, match.timeArg)
+    val localKickoff = RugbyDateUtils.formatLocalKickoff(match.timestampSec, match.dateArg)
+    val liveClock = rememberLiveMatchClock(match)
+    var lineupSide by remember(match.id) { mutableStateOf("home") }
+    var activeTab by remember(match.id) { mutableIntStateOf(0) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -502,41 +548,33 @@ fun MatchDetailDialog(
         Surface(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(Spacing.md),
+                .padding(horizontal = Spacing.sm, vertical = Spacing.md),
             shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, MetallicGold.copy(alpha = 0.5f))
+            color = MaterialTheme.colorScheme.background,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                // Encabezado fijo (marcador siempre visible aunque se haga scroll)
                 Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
-                    tonalElevation = 4.dp
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+                    tonalElevation = 6.dp
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = Spacing.md, vertical = Spacing.sm)
-                    ) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(Spacing.md)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = match.leagueName,
-                                style = MaterialTheme.typography.labelMedium,
+                                text = match.leagueName.ifBlank { match.leagueShort },
+                                style = MaterialTheme.typography.labelLarge,
                                 color = MetallicGold,
                                 fontWeight = FontWeight.Bold,
-                                modifier = Modifier.weight(1f),
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
                             )
-                            IconButton(
-                                onClick = onDismiss,
-                                modifier = Modifier.size(48.dp)
-                            ) {
-                                Icon(Icons.Outlined.Close, contentDescription = "Cerrar detalle del partido")
+                            IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) {
+                                Icon(Icons.Outlined.Close, contentDescription = "Cerrar detalle")
                             }
                         }
                         Row(
@@ -545,7 +583,7 @@ fun MatchDetailDialog(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                                TeamCrestWithFlag(match.homeCrestUrl, match.homeFlagUrl, match.homeName, size = 36.dp)
+                                TeamCrestWithFlag(match.homeCrestUrl, match.homeFlagUrl, match.homeName, size = 38.dp)
                                 Spacer(Modifier.height(4.dp))
                                 Text(
                                     text = match.homeName,
@@ -555,26 +593,39 @@ fun MatchDetailDialog(
                                     overflow = TextOverflow.Ellipsis
                                 )
                             }
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = Spacing.sm)) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                                val scoreStr = if (match.homeScore == null && match.awayScore == null) {
+                                    "VS"
+                                } else {
+                                    "${match.homeScore ?: 0} - ${match.awayScore ?: 0}"
+                                }
                                 Text(
-                                    text = "${match.homeScore ?: "-"} : ${match.awayScore ?: "-"}",
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    color = if (match.status == MatchStatus.LIVE) PitchGreen else MaterialTheme.colorScheme.onSurface,
-                                    fontWeight = FontWeight.Bold
+                                    text = scoreStr,
+                                    style = MaterialTheme.typography.headlineSmall.copy(fontFeatureSettings = "tnum"),
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = if (match.status == MatchStatus.LIVE) PitchGreen else MaterialTheme.colorScheme.onSurface
                                 )
-                                Text(
-                                    text = when {
-                                        isDraw && match.status == MatchStatus.FINISHED -> "Empate · Final"
-                                        match.isExtraTime -> "Tiempo extra"
-                                        match.status == MatchStatus.LIVE -> listOf(match.periodDisplay, match.minuteDisplay).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "EN VIVO" }
-                                        else -> match.periodDisplay
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (match.status == MatchStatus.LIVE) PitchGreen else MetallicGold
-                                )
+                                Spacer(Modifier.height(2.dp))
+                                if (match.status == MatchStatus.LIVE) {
+                                    val liveStatusText = listOf(match.periodDisplay, liveClock)
+                                        .filter { it.isNotBlank() }
+                                        .joinToString(" · ")
+                                        .ifBlank { "EN VIVO" }
+                                    PulsingLiveIndicator(label = liveStatusText)
+                                } else {
+                                    Text(
+                                        text = when {
+                                            isDraw && match.status == MatchStatus.FINISHED -> "Empate · Final"
+                                            match.isExtraTime -> "Tiempo extra"
+                                            else -> match.periodDisplay.ifBlank { match.status.label }
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MetallicGold
+                                    )
+                                }
                             }
                             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                                TeamCrestWithFlag(match.awayCrestUrl, match.awayFlagUrl, match.awayName, size = 36.dp)
+                                TeamCrestWithFlag(match.awayCrestUrl, match.awayFlagUrl, match.awayName, size = 38.dp)
                                 Spacer(Modifier.height(4.dp))
                                 Text(
                                     text = match.awayName,
@@ -585,11 +636,30 @@ fun MatchDetailDialog(
                                 )
                             }
                         }
+
+                        Spacer(Modifier.height(Spacing.sm))
+                        val tabs = listOf("Resumen", "Plantel", "Eventos", "Noticias")
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                        ) {
+                            tabs.forEachIndexed { idx, label ->
+                                val selected = activeTab == idx
+                                FilterChip(
+                                    selected = selected,
+                                    onClick = { activeTab = idx },
+                                    label = { Text(label, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium) },
+                                    colors = rugbyChipColors(),
+                                    modifier = Modifier.heightIn(min = 42.dp)
+                                )
+                            }
+                        }
                     }
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
 
-                // Contenido desplazable
                 Column(
                     modifier = Modifier
                         .weight(1f)
@@ -608,93 +678,104 @@ fun MatchDetailDialog(
                         color = MaterialTheme.colorScheme.primary
                     )
 
-                    if (!match.statusNote.isNullOrBlank()) {
-                        GlassCard {
-                            Text(
-                                text = "${match.status.label}: ${match.statusNote}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MetallicGold
+                    when (activeTab) {
+                        0 -> {
+                            if (!match.statusNote.isNullOrBlank()) {
+                                GlassCard {
+                                    Text(
+                                        text = "${match.status.label}: ${match.statusNote}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MetallicGold
+                                    )
+                                }
+                            }
+
+                            MatchWeatherCard(
+                                weather = match.weather,
+                                dayPart = dayPart,
+                                localTimeLabel = localKickoff
+                            )
+
+                            GlassCard {
+                                Text("Indumentaria y Entrenadores", style = MaterialTheme.typography.titleMedium, color = MetallicGold)
+                                Spacer(Modifier.height(Spacing.sm))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(match.homeName, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            text = match.homeCoach.takeIf { it.isNotBlank() }?.let { "DT: $it" } ?: "DT: Información no disponible",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(Modifier.height(6.dp))
+                                        RugbyJerseyBadge(kit = match.homeKit, size = 36.dp)
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(
+                                            text = if (match.homeActiveKitRole != ActiveKitRole.UNKNOWN) {
+                                                "Juega con ${match.homeActiveKitRole.label}"
+                                            } else {
+                                                "Información no disponible"
+                                            },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (match.homeActiveKitRole != ActiveKitRole.UNKNOWN) PitchGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Spacer(Modifier.width(Spacing.sm))
+                                    Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(match.awayName, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            text = match.awayCoach.takeIf { it.isNotBlank() }?.let { "DT: $it" } ?: "DT: Información no disponible",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(Modifier.height(6.dp))
+                                        RugbyJerseyBadge(kit = match.awayKit, size = 36.dp)
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(
+                                            text = if (match.awayActiveKitRole != ActiveKitRole.UNKNOWN) {
+                                                "Juega con ${match.awayActiveKitRole.label}"
+                                            } else {
+                                                "Información no disponible"
+                                            },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (match.awayActiveKitRole == ActiveKitRole.AWAY) MetallicGold else if (match.awayActiveKitRole == ActiveKitRole.HOME) PitchGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+
+                            MatchOfficialsCard(
+                                refereeName = match.refereeName,
+                                officials = match.officials
                             )
                         }
-                    }
-
-                    MatchWeatherCard(
-                        weather = match.weather,
-                        dayPart = dayPart,
-                        localTimeLabel = localKickoff
-                    )
-
-                    GlassCard {
-                        Text("Indumentaria y Entrenadores", style = MaterialTheme.typography.titleMedium, color = MetallicGold)
-                        Spacer(Modifier.height(Spacing.sm))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(match.homeName, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                                Text(
-                                    text = match.homeCoach.takeIf { it.isNotBlank() }?.let { "DT: $it" } ?: "DT: Información no disponible",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(Modifier.height(6.dp))
-                                RugbyJerseyBadge(kit = match.homeKit, size = 36.dp)
-                                Spacer(Modifier.height(4.dp))
-                                Text(
-                                    text = if (match.homeActiveKitRole != ActiveKitRole.UNKNOWN) {
-                                        "Juega con ${match.homeActiveKitRole.label}"
-                                    } else {
-                                        "Información no disponible"
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (match.homeActiveKitRole != ActiveKitRole.UNKNOWN) PitchGreen else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                        1 -> {
+                            MatchLineupShowcaseCard(
+                                match = match,
+                                selectedSide = lineupSide,
+                                onSelectSide = { lineupSide = it },
+                                onSelectPlayer = onSelectPlayer
+                            )
+                        }
+                        2 -> {
+                            GlassCard {
+                                Text("Cronología del partido", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.height(Spacing.sm))
+                                MatchTimelineSection(match.events)
                             }
-                            Spacer(Modifier.width(Spacing.sm))
-                            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(match.awayName, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                                Text(
-                                    text = match.awayCoach.takeIf { it.isNotBlank() }?.let { "DT: $it" } ?: "DT: Información no disponible",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(Modifier.height(6.dp))
-                                RugbyJerseyBadge(kit = match.awayKit, size = 36.dp)
-                                Spacer(Modifier.height(4.dp))
-                                Text(
-                                    text = if (match.awayActiveKitRole != ActiveKitRole.UNKNOWN) {
-                                        "Juega con ${match.awayActiveKitRole.label}"
-                                    } else {
-                                        "Información no disponible"
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (match.awayActiveKitRole == ActiveKitRole.AWAY) MetallicGold else if (match.awayActiveKitRole == ActiveKitRole.HOME) PitchGreen else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                            GlassCard {
+                                Text("Estadísticas del encuentro", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.secondary)
+                                Spacer(Modifier.height(Spacing.sm))
+                                LiveStatsSection(match.liveStats)
                             }
                         }
+                        else -> {
+                            MatchLiveCoverageSection(match = match, allNews = news)
+                        }
                     }
-
-                    MatchOfficialsCard(
-                        refereeName = match.refereeName,
-                        officials = match.officials
-                    )
-
-                    MatchLineupShowcaseCard(
-                        match = match,
-                        selectedSide = lineupSide,
-                        onSelectSide = { lineupSide = it },
-                        onSelectPlayer = onSelectPlayer
-                    )
-
-                    Text("Cronología del partido", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-                    MatchTimelineSection(match.events)
-
-                    HorizontalDivider()
-                    Text("Estadísticas en vivo", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.secondary)
-                    LiveStatsSection(match.liveStats)
-                    HorizontalDivider()
-                    MatchLiveCoverageSection(match = match, allNews = news)
                 }
             }
         }

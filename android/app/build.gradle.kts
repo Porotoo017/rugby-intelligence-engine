@@ -13,8 +13,8 @@ android {
         applicationId = "com.rugbypro.max"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "4.0.2-Pro"
+        versionCode = 2
+        versionName = "4.0.3-Pro"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true

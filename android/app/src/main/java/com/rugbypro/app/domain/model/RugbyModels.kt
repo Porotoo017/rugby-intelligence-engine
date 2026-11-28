@@ -189,7 +189,10 @@ data class RugbyMatch(
     val refereeName: String = "",
     val officials: List<MatchOfficial> = emptyList(),
     val homeLineup: List<PlayerProfile> = emptyList(),
-    val awayLineup: List<PlayerProfile> = emptyList()
+    val awayLineup: List<PlayerProfile> = emptyList(),
+    val clockSeconds: Int? = null,
+    val clockSyncedAtMs: Long = 0L,
+    val clockRunning: Boolean = false
 )
 
 data class CompetitionItem(

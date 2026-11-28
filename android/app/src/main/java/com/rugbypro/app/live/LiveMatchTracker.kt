@@ -29,23 +29,33 @@ class LiveMatchTracker(
         pollingJob = scope.launch {
             var tick = 0
             while (isActive) {
-                val curMatches = getCurrentDashboard()?.matches.orEmpty()
+                val curDash = getCurrentDashboard()
+                val curMatches = curDash?.matches.orEmpty()
                 val hasLiveOrPreMatch = curMatches.any {
                     it.status == MatchStatus.LIVE || PreMatchWindowUseCase.isInsideThirtyMinuteWindow(it)
                 }
                 val baseSec = getConfig().liveRefreshSec.coerceIn(15, 60)
-                val intervalSec = if (hasLiveOrPreMatch) minOf(baseSec, 15) else baseSec
-                delay(intervalSec * 1000L)
+                val intervalMs = if (hasLiveOrPreMatch) 5_000L else (baseSec * 1000L)
+                delay(intervalMs)
                 tick++
                 runCatching {
-                    val prevMatches = getCurrentDashboard()?.matches.orEmpty()
+                    val latestDash = getCurrentDashboard()
+                    val prevMatches = latestDash?.matches.orEmpty()
                     val cfg = getConfig()
                     val nowMs = System.currentTimeMillis()
                     val preMatchNow = prevMatches.firstOrNull { PreMatchWindowUseCase.isInsideThirtyMinuteWindow(it, nowMs) }
-                    val nextDash = repository.syncWithCascade(
-                        forceLiveRefresh = preMatchNow != null || tick % 6 == 0,
-                        forcePreMatchId = preMatchNow?.id
-                    )
+                    val stillLiveOrPre = prevMatches.any {
+                        it.status == MatchStatus.LIVE || PreMatchWindowUseCase.isInsideThirtyMinuteWindow(it, nowMs)
+                    }
+                    val runFullSync = !stillLiveOrPre || tick % 12 == 0
+                    val nextDash = if (runFullSync) {
+                        repository.syncWithCascade(
+                            forceLiveRefresh = preMatchNow != null || tick % 24 == 0,
+                            forcePreMatchId = preMatchNow?.id
+                        )
+                    } else {
+                        repository.syncLivePulseOnly(latestDash)
+                    }
                     val alerts = DetectKeyLiveEventsUseCase.execute(
                         previous = prevMatches,
                         current = nextDash.matches,

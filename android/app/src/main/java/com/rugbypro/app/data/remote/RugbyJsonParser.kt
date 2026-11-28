@@ -32,6 +32,26 @@ object RugbyJsonParser {
     private val dayFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy")
     private val timeFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
+    private fun parseClockSeconds(clockLabel: String): Int? {
+        val clean = clockLabel.trim()
+        if (clean.isBlank()) return null
+        if (":" in clean) {
+            val parts = clean.split(":")
+            if (parts.size == 2) {
+                val m = parts[0].filter { it.isDigit() }.toIntOrNull() ?: return null
+                val s = parts[1].filter { it.isDigit() }.toIntOrNull() ?: 0
+                return (m * 60) + s.coerceIn(0, 59)
+            }
+        }
+        val minsOnly = clean.replace("+", "").replace("'", "").trim().toIntOrNull()
+        return minsOnly?.let { it * 60 }
+    }
+
+    fun formatClockMmSs(secs: Int): String {
+        val s = secs.coerceAtLeast(0)
+        return String.format(java.util.Locale.US, "%02d:%02d", s / 60, s % 60)
+    }
+
     fun parseEngineSnapshot(jsonStr: String, savedNewsIds: Set<String> = emptySet()): RugbyDashboard {
         val root = JSONObject(jsonStr)
         val generatedAtArg = RugbyDateUtils.normalizeDisplayDate(root.optString("generatedAtArg", ""))
@@ -626,10 +646,13 @@ object RugbyJsonParser {
                 state == "post" -> MatchStatus.FINISHED
                 else -> MatchStatus.SCHEDULED
             }
-            val clock = statusObj.optString("displayClock", "")
+            val clock = statusObj.optString("displayClock", "").trim()
             val periodNum = statusObj.optInt("period", 0)
-            val isEt = periodNum > 2 || shortDetail.lowercase().let { "et" in it || "extra" in it || "ot" in it }
+            val sdLow = shortDetail.lowercase()
+            val isHt = status == MatchStatus.LIVE && ("ht" in sdLow || "half" in sdLow || "entretiempo" in sdLow || "descanso" in sdLow)
+            val isEt = periodNum > 2 || sdLow.let { "et" in it || "extra" in it || "ot" in it }
             val periodLabel = when {
+                isHt -> "Entretiempo"
                 status == MatchStatus.LIVE && isEt -> "Tiempo extra"
                 status == MatchStatus.LIVE && periodNum == 1 -> "1er Tiempo"
                 status == MatchStatus.LIVE && periodNum == 2 -> "2do Tiempo"
@@ -637,6 +660,14 @@ object RugbyJsonParser {
                 status == MatchStatus.POSTPONED -> "Postergado"
                 status == MatchStatus.CANCELLED -> "Cancelado"
                 else -> shortDetail.ifBlank { status.label }
+            }
+            val parsedEspnSecs = if (status == MatchStatus.LIVE) parseClockSeconds(clock) else null
+            val nowSyncMs = System.currentTimeMillis()
+            val formattedEspnClock = when {
+                status != MatchStatus.LIVE -> ""
+                isHt -> "Entretiempo"
+                parsedEspnSecs != null && parsedEspnSecs > 0 -> formatClockMmSs(parsedEspnSecs)
+                else -> clock
             }
             val isoDate = ev.optString("date", "")
             val zdt = runCatching { Instant.parse(isoDate).atZone(artZone) }.getOrNull()
@@ -664,7 +695,7 @@ object RugbyJsonParser {
                     group = if (isArg) "nations" else "clubs",
                     category = if (isArg) "Selecciones" else "Clubes",
                     status = status,
-                    minuteDisplay = clock,
+                    minuteDisplay = formattedEspnClock,
                     periodDisplay = periodLabel,
                     dateArg = zdt?.let { argFmt.format(it) } ?: isoDate,
                     dayArg = zdt?.let { dayFmt.format(it) } ?: "",
@@ -692,7 +723,10 @@ object RugbyJsonParser {
                     events = emptyList(),
                     liveStats = null,
                     statusNote = shortDetail.takeIf { it.isNotBlank() && (status == MatchStatus.POSTPONED || status == MatchStatus.CANCELLED) },
-                    isExtraTime = isEt
+                    isExtraTime = isEt,
+                    clockSeconds = parsedEspnSecs,
+                    clockSyncedAtMs = if (parsedEspnSecs != null) nowSyncMs else 0L,
+                    clockRunning = status == MatchStatus.LIVE && !isHt && parsedEspnSecs != null
                 )
             )
         }
@@ -809,11 +843,20 @@ object RugbyJsonParser {
             val aScore = if (status == MatchStatus.SCHEDULED || scores == null || scores.length() < 2) null else scores.optInt(1)
             val clockObj = m.optJSONObject("clock")
             val clockLabel = clockObj?.optString("label", "")?.trim().orEmpty()
-            val clockSecs = clockObj?.optInt("secs", -1) ?: -1
+            val clockSecsRaw = clockObj?.optInt("secs", -1) ?: -1
+            val parsedWrSecs = when {
+                status != MatchStatus.LIVE -> null
+                clockSecsRaw >= 0 -> clockSecsRaw
+                else -> parseClockSeconds(clockLabel)
+            }
+            val isWrHalftime = stRaw in setOf("LHT", "HT")
+            val isWrRunning = status == MatchStatus.LIVE && !isWrHalftime && stRaw in setOf("L1", "L2", "LET", "L1ET", "L2ET")
+            val nowWrSync = System.currentTimeMillis()
             val clockDisp = when {
                 status != MatchStatus.LIVE -> ""
+                isWrHalftime -> "Entretiempo"
+                parsedWrSecs != null && parsedWrSecs > 0 -> formatClockMmSs(parsedWrSecs)
                 clockLabel.isNotBlank() && clockLabel != "00:00" -> clockLabel
-                clockSecs >= 0 -> "${clockSecs / 60}'"
                 else -> ""
             }
             val hName = home.optString("name")
@@ -881,7 +924,10 @@ object RugbyJsonParser {
                     verifiedSources = listOf("official_live"),
                     events = emptyList(),
                     liveStats = null,
-                    isExtraTime = stRaw in setOf("LET", "L1ET", "L2ET", "ET")
+                    isExtraTime = stRaw in setOf("LET", "L1ET", "L2ET", "ET"),
+                    clockSeconds = parsedWrSecs,
+                    clockSyncedAtMs = if (parsedWrSecs != null) nowWrSync else 0L,
+                    clockRunning = isWrRunning
                 )
             )
         }
@@ -990,7 +1036,10 @@ object RugbyJsonParser {
         val updatedPeriodDisplay: String? = null,
         val updatedMinuteDisplay: String? = null,
         val updatedHomeScore: Int? = null,
-        val updatedAwayScore: Int? = null
+        val updatedAwayScore: Int? = null,
+        val updatedClockSeconds: Int? = null,
+        val updatedClockSyncedAtMs: Long = 0L,
+        val updatedClockRunning: Boolean? = null
     )
 
     fun parseEspnSummaryFull(
@@ -1044,7 +1093,89 @@ object RugbyJsonParser {
                 awayLineup = parsed
             }
         }
-        return MatchLiveDetail(events, stats, refName, officials, homeLineup, awayLineup)
+        val headerComp = root.optJSONObject("header")
+            ?.optJSONArray("competitions")
+            ?.optJSONObject(0)
+        var upStatus: MatchStatus? = null
+        var upPeriod: String? = null
+        var upMinute: String? = null
+        var upHomeScore: Int? = null
+        var upAwayScore: Int? = null
+        var upClockSecs: Int? = null
+        var upClockSyncMs = 0L
+        var upClockRunning: Boolean? = null
+        if (headerComp != null) {
+            val comps = headerComp.optJSONArray("competitors")
+            if (comps != null) {
+                for (i in 0 until comps.length()) {
+                    val c = comps.optJSONObject(i) ?: continue
+                    val ha = c.optString("homeAway", "").lowercase()
+                    val scVal = c.optString("score", "").toIntOrNull()
+                    if (ha == "home" && scVal != null) upHomeScore = scVal
+                    if (ha == "away" && scVal != null) upAwayScore = scVal
+                }
+            }
+            val stObj = headerComp.optJSONObject("status")
+            val tpObj = stObj?.optJSONObject("type")
+            if (stObj != null && tpObj != null) {
+                val stState = tpObj.optString("state", "").lowercase()
+                val tpName = tpObj.optString("name", "").lowercase()
+                val shortDet = tpObj.optString("shortDetail", "")
+                upStatus = when {
+                    "postpon" in tpName || "delay" in tpName -> MatchStatus.POSTPONED
+                    "cancel" in tpName -> MatchStatus.CANCELLED
+                    stState == "in" -> MatchStatus.LIVE
+                    stState == "post" -> MatchStatus.FINISHED
+                    stState == "pre" -> MatchStatus.SCHEDULED
+                    else -> null
+                }
+                val dispClock = stObj.optString("displayClock", "").trim()
+                val periodNum = stObj.optInt("period", 0)
+                val sdLow = shortDet.lowercase()
+                val isHt = upStatus == MatchStatus.LIVE && ("ht" in sdLow || "half" in sdLow || "entretiempo" in sdLow || "descanso" in sdLow)
+                val isEt = periodNum > 2 || "et" in sdLow || "extra" in sdLow || "ot" in sdLow
+                upPeriod = when {
+                    isHt -> "Entretiempo"
+                    upStatus == MatchStatus.LIVE && isEt -> "Tiempo extra"
+                    upStatus == MatchStatus.LIVE && periodNum == 1 -> "1er Tiempo"
+                    upStatus == MatchStatus.LIVE && periodNum == 2 -> "2do Tiempo"
+                    upStatus == MatchStatus.FINISHED -> "Final"
+                    upStatus == MatchStatus.POSTPONED -> "Postergado"
+                    upStatus == MatchStatus.CANCELLED -> "Cancelado"
+                    else -> shortDet.takeIf { it.isNotBlank() }
+                }
+                if (upStatus == MatchStatus.LIVE) {
+                    val parsedSecs = parseClockSeconds(dispClock)
+                    upClockSecs = parsedSecs
+                    upClockSyncMs = System.currentTimeMillis()
+                    upClockRunning = !isHt && (parsedSecs != null)
+                    upMinute = when {
+                        isHt -> "Entretiempo"
+                        parsedSecs != null && parsedSecs > 0 -> formatClockMmSs(parsedSecs)
+                        else -> dispClock.takeIf { it.isNotBlank() }
+                    }
+                } else if (upStatus != null) {
+                    upClockRunning = false
+                    upMinute = ""
+                }
+            }
+        }
+        return MatchLiveDetail(
+            events = events,
+            liveStats = stats,
+            refereeName = refName,
+            officials = officials,
+            homeLineup = homeLineup,
+            awayLineup = awayLineup,
+            updatedStatus = upStatus,
+            updatedPeriodDisplay = upPeriod,
+            updatedMinuteDisplay = upMinute,
+            updatedHomeScore = upHomeScore,
+            updatedAwayScore = upAwayScore,
+            updatedClockSeconds = upClockSecs,
+            updatedClockSyncedAtMs = upClockSyncMs,
+            updatedClockRunning = upClockRunning
+        )
     }
 
     fun parseWorldRugbyMatchDetail(
@@ -1262,8 +1393,11 @@ object RugbyJsonParser {
         var upMinute: String? = null
         var upHomeScore: Int? = null
         var upAwayScore: Int? = null
+        var upClockSecs: Int? = null
+        var upClockSyncMs = 0L
+        var upClockRunning: Boolean? = null
         if (matchObj != null) {
-            val stRaw = matchObj.optString("status", "U")
+            val stRaw = matchObj.optString("status", "U").uppercase()
             val millis = matchObj.optJSONObject("time")?.optLong("millis", 0L) ?: 0L
             val (st, pLbl) = mapWorldRugbyStatus(stRaw, millis)
             upStatus = st
@@ -1271,10 +1405,19 @@ object RugbyJsonParser {
             val clk = matchObj.optJSONObject("clock")
             val clkLbl = clk?.optString("label", "")?.trim().orEmpty()
             val clkSecs = clk?.optInt("secs", -1) ?: -1
+            val isHt = stRaw in setOf("LHT", "HT")
+            upClockRunning = st == MatchStatus.LIVE && !isHt && stRaw in setOf("L1", "L2", "LET", "L1ET", "L2ET")
+            upClockSecs = when {
+                st != MatchStatus.LIVE -> null
+                clkSecs >= 0 -> clkSecs
+                else -> parseClockSeconds(clkLbl)
+            }
+            if (upClockSecs != null) upClockSyncMs = System.currentTimeMillis()
             upMinute = when {
                 st != MatchStatus.LIVE -> ""
+                isHt -> "Entretiempo"
+                upClockSecs != null && upClockSecs > 0 -> formatClockMmSs(upClockSecs)
                 clkLbl.isNotBlank() && clkLbl != "00:00" -> clkLbl
-                clkSecs >= 0 -> "${clkSecs / 60}'"
                 else -> ""
             }
             val scArr = matchObj.optJSONArray("scores")
@@ -1295,7 +1438,10 @@ object RugbyJsonParser {
             updatedPeriodDisplay = upPeriod,
             updatedMinuteDisplay = upMinute,
             updatedHomeScore = upHomeScore,
-            updatedAwayScore = upAwayScore
+            updatedAwayScore = upAwayScore,
+            updatedClockSeconds = upClockSecs,
+            updatedClockSyncedAtMs = upClockSyncMs,
+            updatedClockRunning = upClockRunning
         )
     }
 

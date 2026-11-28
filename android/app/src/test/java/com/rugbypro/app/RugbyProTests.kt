@@ -385,4 +385,98 @@ class RugbyProTests {
         assertEquals("Seven / SVNS", news.first().category)
         assertTrue(news.first().url.startsWith("https://"))
     }
+
+    @Test
+    fun `world rugby live parser sets running clock and pauses on halftime`() {
+        val nowMs = System.currentTimeMillis()
+        val json = """
+            {
+              "content": [
+                {
+                  "matchId": "live-clk-1",
+                  "status": "L1",
+                  "sport": "mrs",
+                  "clock": {"secs": 312, "label": "05:12"},
+                  "scores": [14, 7],
+                  "time": {"millis": $nowMs},
+                  "events": [{"label": "Men's Sevens Series 2027", "sport": "mrs"}],
+                  "teams": [{"name": "Argentina 7s", "abbreviation": "ARG"}, {"name": "Fiji 7s", "abbreviation": "FIJ"}]
+                },
+                {
+                  "matchId": "live-clk-ht",
+                  "status": "LHT",
+                  "sport": "mrs",
+                  "clock": {"secs": 420, "label": "07:00"},
+                  "scores": [14, 14],
+                  "time": {"millis": $nowMs},
+                  "events": [{"label": "Men's Sevens Series 2027", "sport": "mrs"}],
+                  "teams": [{"name": "France 7s", "abbreviation": "FRA"}, {"name": "Ireland 7s", "abbreviation": "IRE"}]
+                }
+              ]
+            }
+        """.trimIndent()
+        val list = RugbyJsonParser.parseWorldRugbyLive(json)
+        assertEquals(2, list.size)
+        val running = list[0]
+        assertEquals(312, running.clockSeconds)
+        assertTrue(running.clockRunning)
+        assertEquals("05:12", running.minuteDisplay)
+
+        val halftime = list[1]
+        assertFalse(halftime.clockRunning)
+        assertEquals("Entretiempo", halftime.periodDisplay)
+        assertEquals("Entretiempo", halftime.minuteDisplay)
+    }
+
+    @Test
+    fun `cross verify never downgrades live score and keeps fresher clock`() {
+        val primary = RugbyMatch(
+            id = "wr_100",
+            source = "official_live",
+            leagueId = "mrs",
+            leagueName = "SVNS",
+            leagueShort = "SVNS",
+            phase = "Final",
+            group = "sevens",
+            category = "Selecciones",
+            status = MatchStatus.LIVE,
+            minuteDisplay = "46:00",
+            periodDisplay = "2do Tiempo",
+            dateArg = "28/11/2026 · 10:00",
+            dayArg = "28/11/2026",
+            timeArg = "10:00",
+            timestampSec = System.currentTimeMillis() / 1000L,
+            venueName = "Dubai",
+            venueCity = "Dubai",
+            homeName = "Argentina 7s",
+            homeAbbr = "ARG",
+            homeCrestUrl = "",
+            homeFlagUrl = "",
+            awayName = "Fiji 7s",
+            awayAbbr = "FIJ",
+            awayCrestUrl = "",
+            awayFlagUrl = "",
+            homeScore = 28,
+            awayScore = 19,
+            isArgentina = true,
+            clockSeconds = 2760,
+            clockSyncedAtMs = 1000L,
+            clockRunning = true
+        )
+        val laggingPeer = primary.copy(
+            homeScore = 21,
+            awayScore = 12,
+            minuteDisplay = "12:10",
+            clockSeconds = 730,
+            clockSyncedAtMs = 2000L,
+            clockRunning = true
+        )
+        val merged = CrossVerifyMatchesUseCase.execute(listOf(primary), listOf(laggingPeer))
+        assertEquals(1, merged.size)
+        val m = merged.first()
+        assertEquals(28, m.homeScore)
+        assertEquals(19, m.awayScore)
+        assertEquals(730, m.clockSeconds)
+        assertEquals("12:10", m.minuteDisplay)
+    }
 }

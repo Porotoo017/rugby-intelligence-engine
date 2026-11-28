@@ -11,6 +11,9 @@ import com.rugbypro.app.domain.usecase.FilterLiveAndTodayMatchesUseCase
 import com.rugbypro.app.domain.usecase.PreMatchWindowUseCase
 import com.rugbypro.app.domain.usecase.RugbyDateUtils
 import com.rugbypro.app.domain.usecase.WeatherClassificationUseCase
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -57,6 +60,8 @@ class RugbyCascadeClient {
                 val req: Request = chain.request().newBuilder()
                     .header("User-Agent", "RugbyPro/4.0 (Android)")
                     .header("Accept", "application/json, application/xml, text/xml, */*")
+                    .header("Cache-Control", "no-cache, no-store, max-age=0")
+                    .header("Pragma", "no-cache")
                     .build()
                 chain.proceed(req)
             }
@@ -69,6 +74,11 @@ class RugbyCascadeClient {
             .create(DynamicRugbyApi::class.java)
     }
 
+    private fun cacheBust(url: String): String {
+        val sep = if ('?' in url) '&' else '?'
+        return "$url${sep}_t=${System.currentTimeMillis()}"
+    }
+
     private suspend fun fetchWithBackoffAndRotation(
         api: DynamicRugbyApi,
         urls: List<String>,
@@ -76,14 +86,14 @@ class RugbyCascadeClient {
     ): Pair<String?, Long> {
         val started = System.currentTimeMillis()
         for (url in urls) {
-            var waitMs = 350L
+            var waitMs = 300L
             repeat(maxAttemptsPerUrl) {
                 val res = runCatching { api.fetchRaw(url).string() }.getOrNull()
                 if (!res.isNullOrBlank()) {
                     return res to (System.currentTimeMillis() - started)
                 }
                 delay(waitMs)
-                waitMs = (waitMs * 2).coerceAtMost(1800L)
+                waitMs = (waitMs * 2).coerceAtMost(1500L)
             }
         }
         return null to (System.currentTimeMillis() - started)
@@ -92,7 +102,7 @@ class RugbyCascadeClient {
     suspend fun executeCascade(
         timeoutMs: Long,
         includeSnapshot: Boolean
-    ): CascadeSyncResult {
+    ): CascadeSyncResult = coroutineScope {
         val api = buildApi(timeoutMs.coerceIn(4000L, 25000L))
         val tz = TimeZone.getTimeZone("America/Argentina/Buenos_Aires")
         val nowLabel = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).apply { timeZone = tz }.format(Date())
@@ -105,32 +115,110 @@ class RugbyCascadeClient {
         val endDate = nowInstant.plus(7, ChronoUnit.DAYS).atOffset(ZoneOffset.UTC).toLocalDate()
             .format(DateTimeFormatter.ISO_LOCAL_DATE)
 
-        val wrMatchesCollected = mutableListOf<RugbyMatch>()
-        var wrAnyOk = false
-        val wrStarted = System.currentTimeMillis()
-        for (page in 0..1) {
-            val pageUrl = "https://api.wr-rims-prod.pulselive.com/rugby/v3/match" +
-                "?startDate=$startDate&endDate=$endDate&pageSize=100&page=$page&sort=asc"
-            val (wrRaw, _) = fetchWithBackoffAndRotation(api, listOf(pageUrl), maxAttemptsPerUrl = 2)
-            if (wrRaw != null) {
-                wrAnyOk = true
-                val parsed = runCatching { RugbyJsonParser.parseWorldRugbyMatches(wrRaw) }.getOrDefault(emptyList())
-                wrMatchesCollected.addAll(parsed)
-                if (parsed.size < 95) break
+        val wrJob = async {
+            val wrMatchesCollected = mutableListOf<RugbyMatch>()
+            var wrAnyOk = false
+            val wrStarted = System.currentTimeMillis()
+            for (page in 0..1) {
+                val pageUrl = cacheBust(
+                    "https://api.wr-rims-prod.pulselive.com/rugby/v3/match" +
+                        "?startDate=$startDate&endDate=$endDate&pageSize=100&page=$page&sort=asc"
+                )
+                val (wrRaw, _) = fetchWithBackoffAndRotation(api, listOf(pageUrl), maxAttemptsPerUrl = 2)
+                if (wrRaw != null) {
+                    wrAnyOk = true
+                    val parsed = runCatching { RugbyJsonParser.parseWorldRugbyMatches(wrRaw) }.getOrDefault(emptyList())
+                    wrMatchesCollected.addAll(parsed)
+                    if (parsed.size < 95) break
+                } else {
+                    break
+                }
+            }
+            if (wrMatchesCollected.isEmpty()) {
+                val fallbackUrl = cacheBust("https://api.wr-rims-prod.pulselive.com/rugby/v3/match?states=L,U&pageSize=60&sort=desc")
+                val (fbRaw, _) = fetchWithBackoffAndRotation(api, listOf(fallbackUrl), maxAttemptsPerUrl = 1)
+                if (fbRaw != null) {
+                    wrAnyOk = true
+                    wrMatchesCollected.addAll(runCatching { RugbyJsonParser.parseWorldRugbyMatches(fbRaw) }.getOrDefault(emptyList()))
+                }
+            }
+            Triple(wrMatchesCollected.distinctBy { it.id }, wrAnyOk, System.currentTimeMillis() - wrStarted)
+        }
+
+        val snapJob = async {
+            if (!includeSnapshot) return@async (null as String?) to 0L
+            val snapUrls = listOf(
+                "https://porotoo017.github.io/rugby-intelligence-engine/data/rugby_engine_output.json",
+                "https://raw.githubusercontent.com/Porotoo017/rugby-intelligence-engine/main/data/rugby_engine_output.json"
+            )
+            val (snapRaw, snapLat) = fetchWithBackoffAndRotation(api, snapUrls)
+            val valid = snapRaw?.takeIf { it.trimStart().startsWith("{") }
+            valid to snapLat
+        }
+
+        val secStarted = System.currentTimeMillis()
+        val panelJob = async {
+            val (panelRaw, _) = fetchWithBackoffAndRotation(
+                api,
+                listOf(cacheBust("https://site.api.espn.com/apis/site/v2/sports/rugby/scorepanel")),
+                maxAttemptsPerUrl = 1
+            )
+            if (panelRaw != null) {
+                true to (runCatching { RugbyJsonParser.parseEspnScorepanel(panelRaw) }.getOrDefault(emptyList()))
             } else {
-                break
+                false to emptyList()
             }
         }
-        if (wrMatchesCollected.isEmpty()) {
-            val fallbackUrl = "https://api.wr-rims-prod.pulselive.com/rugby/v3/match?states=L,U&pageSize=60&sort=desc"
-            val (fbRaw, _) = fetchWithBackoffAndRotation(api, listOf(fallbackUrl), maxAttemptsPerUrl = 1)
-            if (fbRaw != null) {
-                wrAnyOk = true
-                wrMatchesCollected.addAll(runCatching { RugbyJsonParser.parseWorldRugbyMatches(fbRaw) }.getOrDefault(emptyList()))
+
+        val leagueJobs = SECONDARY_LEAGUES.map { (lid, lName) ->
+            async {
+                val sbUrl = cacheBust("https://site.api.espn.com/apis/site/v2/sports/rugby/$lid/scoreboard")
+                val (sbRaw, _) = fetchWithBackoffAndRotation(api, listOf(sbUrl), maxAttemptsPerUrl = 1)
+                if (sbRaw != null) {
+                    true to (runCatching { RugbyJsonParser.parseEspnScoreboard(sbRaw, lid, lName) }.getOrDefault(emptyList()))
+                } else {
+                    false to emptyList()
+                }
             }
         }
-        val wrMatches = wrMatchesCollected.distinctBy { it.id }
-        val wrLat = System.currentTimeMillis() - wrStarted
+
+        val newsStarted = System.currentTimeMillis()
+        val newsJobs = listOf(
+            async {
+                val (raw, _) = fetchWithBackoffAndRotation(
+                    api,
+                    listOf("https://api.wr-rims-prod.pulselive.com/content/worldrugby/text/es?pageSize=22"),
+                    maxAttemptsPerUrl = 1
+                )
+                raw?.let { runCatching { RugbyJsonParser.parseWorldRugbyContentNews(it, "es") }.getOrDefault(emptyList()) } ?: emptyList()
+            },
+            async {
+                val (raw, _) = fetchWithBackoffAndRotation(
+                    api,
+                    listOf("https://api.wr-rims-prod.pulselive.com/content/worldrugby/text/en?pageSize=22"),
+                    maxAttemptsPerUrl = 1
+                )
+                raw?.let { runCatching { RugbyJsonParser.parseWorldRugbyContentNews(it, "en") }.getOrDefault(emptyList()) } ?: emptyList()
+            },
+            async {
+                val (raw, _) = fetchWithBackoffAndRotation(
+                    api,
+                    listOf("https://feeds.bbci.co.uk/sport/rugby-union/rss.xml"),
+                    maxAttemptsPerUrl = 1
+                )
+                raw?.let { runCatching { RugbyJsonParser.parseRssNews(it, "BBC Rugby", "Internacional") }.getOrDefault(emptyList()) } ?: emptyList()
+            },
+            async {
+                val (raw, _) = fetchWithBackoffAndRotation(
+                    api,
+                    listOf("https://www.cordobaxv.com.ar/feed/"),
+                    maxAttemptsPerUrl = 1
+                )
+                raw?.let { runCatching { RugbyJsonParser.parseRssNews(it, "Córdoba XV", "Los Pumas") }.getOrDefault(emptyList()) } ?: emptyList()
+            }
+        )
+
+        val (wrMatches, wrAnyOk, wrLat) = wrJob.await()
         health.add(
             SourceHealthItem(
                 id = "tier1_official",
@@ -144,16 +232,8 @@ class RugbyCascadeClient {
             )
         )
 
-        var snapshotJson: String? = null
+        val (snapshotJson, snapLat) = snapJob.await()
         if (includeSnapshot) {
-            val snapUrls = listOf(
-                "https://porotoo017.github.io/rugby-intelligence-engine/data/rugby_engine_output.json",
-                "https://raw.githubusercontent.com/Porotoo017/rugby-intelligence-engine/main/data/rugby_engine_output.json"
-            )
-            val (snapRaw, snapLat) = fetchWithBackoffAndRotation(api, snapUrls)
-            if (snapRaw != null && snapRaw.trimStart().startsWith("{")) {
-                snapshotJson = snapRaw
-            }
             health.add(
                 SourceHealthItem(
                     id = "tier1_snapshot",
@@ -168,73 +248,24 @@ class RugbyCascadeClient {
             )
         }
 
-        // Nivel 2: Scoreboard global + ligas secundarias (15s y 7s)
         val secondaryCollected = mutableListOf<RugbyMatch>()
-        val secStarted = System.currentTimeMillis()
         var secSuccessCount = 0
-
-        val (panelRaw, _) = fetchWithBackoffAndRotation(
-            api,
-            listOf("https://site.api.espn.com/apis/site/v2/sports/rugby/scorepanel"),
-            maxAttemptsPerUrl = 1
-        )
-        if (panelRaw != null) {
-            secSuccessCount++
-            runCatching { RugbyJsonParser.parseEspnScorepanel(panelRaw) }
-                .getOrNull()?.let { secondaryCollected.addAll(it) }
-        }
-
-        val secondaryLeagues = listOf(
-            "289234" to "Internacionales",
-            "24400" to "Nations Championship",
-            "270557" to "Six Nations",
-            "242041" to "Rugby Championship",
-            "270559" to "Top 14",
-            "267979" to "URC",
-            "270555" to "Premiership Rugby",
-            "272073" to "Champions Cup",
-            "282" to "Sevens Masculino",
-            "283" to "Sevens Femenino"
-        )
-        for ((lid, lName) in secondaryLeagues) {
-            val sbUrl = "https://site.api.espn.com/apis/site/v2/sports/rugby/$lid/scoreboard"
-            val (sbRaw, _) = fetchWithBackoffAndRotation(api, listOf(sbUrl), maxAttemptsPerUrl = 1)
-            if (sbRaw != null) {
-                secSuccessCount++
-                runCatching { RugbyJsonParser.parseEspnScoreboard(sbRaw, lid, lName) }
-                    .getOrNull()?.let { secondaryCollected.addAll(it) }
-            }
+        val (panelOk, panelMatches) = panelJob.await()
+        if (panelOk) secSuccessCount++
+        secondaryCollected.addAll(panelMatches)
+        for ((ok, lMatches) in leagueJobs.awaitAll()) {
+            if (ok) secSuccessCount++
+            secondaryCollected.addAll(lMatches)
         }
         val uniqueSecondary = secondaryCollected.distinctBy { it.id }
 
-        // Enriquecer partidos secundarios en vivo con play-by-play y estadísticas
-        val enrichedSecondary = mutableListOf<RugbyMatch>()
-        var liveSecEnriched = 0
-        for (m in uniqueSecondary) {
-            if (m.status == MatchStatus.LIVE && liveSecEnriched < 6) {
-                liveSecEnriched++
-                val evId = m.id.removePrefix("espn_")
-                val sumUrl = "https://site.api.espn.com/apis/site/v2/sports/rugby/${m.leagueId}/summary?event=$evId"
-                val (sumRaw, _) = fetchWithBackoffAndRotation(api, listOf(sumUrl), maxAttemptsPerUrl = 1)
-                if (sumRaw != null) {
-                    val det = runCatching { RugbyJsonParser.parseEspnSummaryFull(sumRaw, m.homeName, m.awayName) }.getOrNull()
-                    if (det != null) {
-                        enrichedSecondary.add(
-                            m.copy(
-                                events = det.events,
-                                liveStats = det.liveStats,
-                                refereeName = det.refereeName.ifBlank { m.refereeName },
-                                officials = det.officials.ifEmpty { m.officials },
-                                homeLineup = det.homeLineup.ifEmpty { m.homeLineup },
-                                awayLineup = det.awayLineup.ifEmpty { m.awayLineup }
-                            )
-                        )
-                        continue
-                    }
-                }
+        // Enriquecer partidos secundarios en vivo en paralelo
+        val liveSecTargets = uniqueSecondary.filter { it.status == MatchStatus.LIVE }.take(8).map { it.id }.toSet()
+        val enrichedSecondary = uniqueSecondary.map { m ->
+            async {
+                if (m.id in liveSecTargets) enrichSingleMatchWithApi(api, m) else m
             }
-            enrichedSecondary.add(m)
-        }
+        }.awaitAll()
 
         health.add(
             SourceHealthItem(
@@ -249,42 +280,7 @@ class RugbyCascadeClient {
             )
         )
 
-        // Nivel Noticias en vivo (World Rugby ES + EN para SVNS/Internacional + BBC RSS + Córdoba XV RSS)
-        val liveNewsList = mutableListOf<NewsArticle>()
-        val newsStarted = System.currentTimeMillis()
-        val (wrEsNewsRaw, _) = fetchWithBackoffAndRotation(
-            api,
-            listOf("https://api.wr-rims-prod.pulselive.com/content/worldrugby/text/es?pageSize=22"),
-            maxAttemptsPerUrl = 1
-        )
-        wrEsNewsRaw?.let {
-            liveNewsList.addAll(runCatching { RugbyJsonParser.parseWorldRugbyContentNews(it, "es") }.getOrDefault(emptyList()))
-        }
-        val (wrEnNewsRaw, _) = fetchWithBackoffAndRotation(
-            api,
-            listOf("https://api.wr-rims-prod.pulselive.com/content/worldrugby/text/en?pageSize=22"),
-            maxAttemptsPerUrl = 1
-        )
-        wrEnNewsRaw?.let {
-            liveNewsList.addAll(runCatching { RugbyJsonParser.parseWorldRugbyContentNews(it, "en") }.getOrDefault(emptyList()))
-        }
-        val (bbcRaw, _) = fetchWithBackoffAndRotation(
-            api,
-            listOf("https://feeds.bbci.co.uk/sport/rugby-union/rss.xml"),
-            maxAttemptsPerUrl = 1
-        )
-        bbcRaw?.let {
-            liveNewsList.addAll(runCatching { RugbyJsonParser.parseRssNews(it, "BBC Rugby", "Internacional") }.getOrDefault(emptyList()))
-        }
-        val (cbaRaw, _) = fetchWithBackoffAndRotation(
-            api,
-            listOf("https://www.cordobaxv.com.ar/feed/"),
-            maxAttemptsPerUrl = 1
-        )
-        cbaRaw?.let {
-            liveNewsList.addAll(runCatching { RugbyJsonParser.parseRssNews(it, "Córdoba XV", "Los Pumas") }.getOrDefault(emptyList()))
-        }
-
+        val liveNewsList = newsJobs.awaitAll().flatten()
         health.add(
             SourceHealthItem(
                 id = "tier2_news",
@@ -298,12 +294,139 @@ class RugbyCascadeClient {
             )
         )
 
-        return CascadeSyncResult(
+        CascadeSyncResult(
             snapshotJson = snapshotJson,
             worldRugbyMatches = wrMatches,
             secondaryLiveMatches = enrichedSecondary,
             healthItems = health,
             liveNews = liveNewsList
+        )
+    }
+
+    /**
+     * Pulso rápido paralelo (1-2s) para actualizar marcadores, reloj oficial y eventos en vivo cada 5 segundos
+     * sin descargar snapshots pesados ni noticias repetidamente.
+     */
+    suspend fun executeFastLivePulse(
+        currentMatches: List<RugbyMatch>,
+        timeoutMs: Long
+    ): CascadeSyncResult = coroutineScope {
+        val api = buildApi(timeoutMs.coerceIn(3500L, 12000L))
+        val tz = TimeZone.getTimeZone("America/Argentina/Buenos_Aires")
+        val nowLabel = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).apply { timeZone = tz }.format(Date())
+        val nowInstant = Instant.now()
+        val startDate = nowInstant.minus(1, ChronoUnit.DAYS).atOffset(ZoneOffset.UTC).toLocalDate()
+            .format(DateTimeFormatter.ISO_LOCAL_DATE)
+        val endDate = nowInstant.plus(2, ChronoUnit.DAYS).atOffset(ZoneOffset.UTC).toLocalDate()
+            .format(DateTimeFormatter.ISO_LOCAL_DATE)
+
+        val wrStarted = System.currentTimeMillis()
+        val wrJob = async {
+            val wrUrl = cacheBust(
+                "https://api.wr-rims-prod.pulselive.com/rugby/v3/match" +
+                    "?startDate=$startDate&endDate=$endDate&pageSize=100&page=0&sort=asc"
+            )
+            val (raw, _) = fetchWithBackoffAndRotation(api, listOf(wrUrl), maxAttemptsPerUrl = 1)
+            if (raw != null) {
+                true to runCatching { RugbyJsonParser.parseWorldRugbyMatches(raw) }.getOrDefault(emptyList())
+            } else {
+                val fbUrl = cacheBust("https://api.wr-rims-prod.pulselive.com/rugby/v3/match?states=L,U&pageSize=60&sort=desc")
+                val (fbRaw, _) = fetchWithBackoffAndRotation(api, listOf(fbUrl), maxAttemptsPerUrl = 1)
+                if (fbRaw != null) {
+                    true to runCatching { RugbyJsonParser.parseWorldRugbyMatches(fbRaw) }.getOrDefault(emptyList())
+                } else {
+                    false to emptyList()
+                }
+            }
+        }
+
+        val panelJob = async {
+            val (panelRaw, _) = fetchWithBackoffAndRotation(
+                api,
+                listOf(cacheBust("https://site.api.espn.com/apis/site/v2/sports/rugby/scorepanel")),
+                maxAttemptsPerUrl = 1
+            )
+            if (panelRaw != null) {
+                true to runCatching { RugbyJsonParser.parseEspnScorepanel(panelRaw) }.getOrDefault(emptyList())
+            } else {
+                false to emptyList()
+            }
+        }
+
+        val activeEspnLeagues = currentMatches
+            .filter { it.id.startsWith("espn_") && (it.status == MatchStatus.LIVE || FilterLiveAndTodayMatchesUseCase.isScheduledToday(it)) }
+            .map { it.leagueId }
+            .filter { it.isNotBlank() }
+            .distinct()
+        val pulseLeagues = (activeEspnLeagues + listOf("282", "283", "289234", "24400")).distinct()
+        val leagueJobs = pulseLeagues.map { lid ->
+            val lName = SECONDARY_LEAGUES.firstOrNull { it.first == lid }?.second ?: "Rugby"
+            async {
+                val sbUrl = cacheBust("https://site.api.espn.com/apis/site/v2/sports/rugby/$lid/scoreboard")
+                val (sbRaw, _) = fetchWithBackoffAndRotation(api, listOf(sbUrl), maxAttemptsPerUrl = 1)
+                if (sbRaw != null) {
+                    true to runCatching { RugbyJsonParser.parseEspnScoreboard(sbRaw, lid, lName) }.getOrDefault(emptyList())
+                } else {
+                    false to emptyList()
+                }
+            }
+        }
+
+        val (wrOk, wrList) = wrJob.await()
+        val (panelOk, panelList) = panelJob.await()
+        val leagueRes = leagueJobs.awaitAll()
+        val secOk = panelOk || leagueRes.any { it.first }
+        val secList = (panelList + leagueRes.flatMap { it.second }).distinctBy { it.id }
+
+        // Enriquecer en paralelo los partidos LIVE o en ventana de 30 min para traer reloj oficial exacto (/summary) y eventos
+        val nowMs = System.currentTimeMillis()
+        val wrPriorityIds = wrList.filter {
+            it.status == MatchStatus.LIVE || PreMatchWindowUseCase.isInsideThirtyMinuteWindow(it, nowMs)
+        }.take(10).map { it.id }.toSet()
+        val enrichedWr = wrList.map { m ->
+            async {
+                if (m.id in wrPriorityIds) runCatching { enrichSingleMatchWithApi(api, m) }.getOrDefault(m) else m
+            }
+        }.awaitAll()
+
+        val secPriorityIds = secList.filter {
+            it.status == MatchStatus.LIVE || PreMatchWindowUseCase.isInsideThirtyMinuteWindow(it, nowMs)
+        }.take(6).map { it.id }.toSet()
+        val enrichedSec = secList.map { m ->
+            async {
+                if (m.id in secPriorityIds) runCatching { enrichSingleMatchWithApi(api, m) }.getOrDefault(m) else m
+            }
+        }.awaitAll()
+
+        val health = listOf(
+            SourceHealthItem(
+                id = "pulse_wr",
+                name = "Live Pulse WR",
+                tier = 1,
+                statusLabel = if (wrOk) "OK" else "FAIL",
+                isHealthy = wrOk,
+                latencyMs = System.currentTimeMillis() - wrStarted,
+                detail = "${enrichedWr.size}",
+                checkedAtArg = nowLabel
+            ),
+            SourceHealthItem(
+                id = "pulse_sec",
+                name = "Live Pulse Sec",
+                tier = 2,
+                statusLabel = if (secOk) "OK" else "FAIL",
+                isHealthy = secOk,
+                latencyMs = System.currentTimeMillis() - wrStarted,
+                detail = "${enrichedSec.size}",
+                checkedAtArg = nowLabel
+            )
+        )
+
+        CascadeSyncResult(
+            snapshotJson = null,
+            worldRugbyMatches = enrichedWr,
+            secondaryLiveMatches = enrichedSec,
+            healthItems = health,
+            liveNews = emptyList()
         )
     }
 
@@ -313,14 +436,17 @@ class RugbyCascadeClient {
         else -> null
     }
 
-    private suspend fun enrichSingleMatchWithApi(api: DynamicRugbyApi, m: RugbyMatch): RugbyMatch {
+    private suspend fun enrichSingleMatchWithApi(api: DynamicRugbyApi, m: RugbyMatch): RugbyMatch = coroutineScope {
         val wrRawId = extractWorldRugbyId(m.id)
         if (wrRawId != null) {
             val base = "https://api.wr-rims-prod.pulselive.com/rugby/v3/match/$wrRawId"
-            val (sumRaw, _) = fetchWithBackoffAndRotation(api, listOf("$base/summary", base), maxAttemptsPerUrl = 1)
+            val sumJob = async { fetchWithBackoffAndRotation(api, listOf(cacheBust("$base/summary"), cacheBust(base)), maxAttemptsPerUrl = 1) }
+            val tlJob = async { fetchWithBackoffAndRotation(api, listOf(cacheBust("$base/timeline")), maxAttemptsPerUrl = 1) }
+            val stJob = async { fetchWithBackoffAndRotation(api, listOf(cacheBust("$base/stats")), maxAttemptsPerUrl = 1) }
+            val (sumRaw, _) = sumJob.await()
+            val (tlRaw, _) = tlJob.await()
+            val (stRaw, _) = stJob.await()
             if (sumRaw != null) {
-                val (tlRaw, _) = fetchWithBackoffAndRotation(api, listOf("$base/timeline"), maxAttemptsPerUrl = 1)
-                val (stRaw, _) = fetchWithBackoffAndRotation(api, listOf("$base/stats"), maxAttemptsPerUrl = 1)
                 val is7s = m.group.equals("sevens", true) ||
                     m.leagueName.contains("sevens", true) ||
                     m.leagueName.contains("svns", true) ||
@@ -329,12 +455,21 @@ class RugbyCascadeClient {
                     RugbyJsonParser.parseWorldRugbyMatchDetail(sumRaw, tlRaw, stRaw, isSevensHint = is7s)
                 }.getOrNull()
                 if (det != null) {
-                    return m.copy(
+                    val curTot = (m.homeScore ?: -1) + (m.awayScore ?: -1)
+                    val sumTot = (det.updatedHomeScore ?: -1) + (det.updatedAwayScore ?: -1)
+                    val keepSumScore = det.updatedStatus == MatchStatus.FINISHED ||
+                        m.status != MatchStatus.LIVE ||
+                        (det.updatedHomeScore != null && det.updatedAwayScore != null && sumTot >= curTot)
+                    val preferDetClock = det.updatedClockSeconds != null || !det.updatedMinuteDisplay.isNullOrBlank()
+                    return@coroutineScope m.copy(
                         status = det.updatedStatus ?: m.status,
-                        periodDisplay = det.updatedPeriodDisplay ?: m.periodDisplay,
-                        minuteDisplay = det.updatedMinuteDisplay?.takeIf { it.isNotBlank() } ?: m.minuteDisplay,
-                        homeScore = det.updatedHomeScore ?: m.homeScore,
-                        awayScore = det.updatedAwayScore ?: m.awayScore,
+                        periodDisplay = det.updatedPeriodDisplay?.takeIf { it.isNotBlank() } ?: m.periodDisplay,
+                        minuteDisplay = if (preferDetClock) (det.updatedMinuteDisplay ?: m.minuteDisplay) else m.minuteDisplay,
+                        clockSeconds = if (preferDetClock) (det.updatedClockSeconds ?: m.clockSeconds) else m.clockSeconds,
+                        clockSyncedAtMs = if (preferDetClock && det.updatedClockSyncedAtMs > 0L) det.updatedClockSyncedAtMs else m.clockSyncedAtMs,
+                        clockRunning = det.updatedClockRunning ?: m.clockRunning,
+                        homeScore = if (keepSumScore) (det.updatedHomeScore ?: m.homeScore) else m.homeScore,
+                        awayScore = if (keepSumScore) (det.updatedAwayScore ?: m.awayScore) else m.awayScore,
                         refereeName = det.refereeName.ifBlank { m.refereeName },
                         officials = det.officials.ifEmpty { m.officials },
                         homeLineup = det.homeLineup.ifEmpty { m.homeLineup },
@@ -346,12 +481,26 @@ class RugbyCascadeClient {
             }
         } else if (m.id.startsWith("espn_")) {
             val evId = m.id.removePrefix("espn_")
-            val url = "https://site.api.espn.com/apis/site/v2/sports/rugby/${m.leagueId}/summary?event=$evId"
+            val url = cacheBust("https://site.api.espn.com/apis/site/v2/sports/rugby/${m.leagueId}/summary?event=$evId")
             val (raw, _) = fetchWithBackoffAndRotation(api, listOf(url), maxAttemptsPerUrl = 1)
             if (raw != null) {
                 val det = runCatching { RugbyJsonParser.parseEspnSummaryFull(raw, m.homeName, m.awayName) }.getOrNull()
                 if (det != null) {
-                    return m.copy(
+                    val curTot = (m.homeScore ?: -1) + (m.awayScore ?: -1)
+                    val sumTot = (det.updatedHomeScore ?: -1) + (det.updatedAwayScore ?: -1)
+                    val keepSumScore = det.updatedStatus == MatchStatus.FINISHED ||
+                        m.status != MatchStatus.LIVE ||
+                        (det.updatedHomeScore != null && det.updatedAwayScore != null && sumTot >= curTot)
+                    val preferDetClock = det.updatedClockSeconds != null || !det.updatedMinuteDisplay.isNullOrBlank()
+                    return@coroutineScope m.copy(
+                        status = det.updatedStatus ?: m.status,
+                        periodDisplay = det.updatedPeriodDisplay?.takeIf { it.isNotBlank() } ?: m.periodDisplay,
+                        minuteDisplay = if (preferDetClock) (det.updatedMinuteDisplay ?: m.minuteDisplay) else m.minuteDisplay,
+                        clockSeconds = if (preferDetClock) (det.updatedClockSeconds ?: m.clockSeconds) else m.clockSeconds,
+                        clockSyncedAtMs = if (preferDetClock && det.updatedClockSyncedAtMs > 0L) det.updatedClockSyncedAtMs else m.clockSyncedAtMs,
+                        clockRunning = det.updatedClockRunning ?: m.clockRunning,
+                        homeScore = if (keepSumScore) (det.updatedHomeScore ?: m.homeScore) else m.homeScore,
+                        awayScore = if (keepSumScore) (det.updatedAwayScore ?: m.awayScore) else m.awayScore,
                         refereeName = det.refereeName.ifBlank { m.refereeName },
                         officials = det.officials.ifEmpty { m.officials },
                         homeLineup = det.homeLineup.ifEmpty { m.homeLineup },
@@ -362,7 +511,7 @@ class RugbyCascadeClient {
                 }
             }
         }
-        return m
+        m
     }
 
     suspend fun fetchSingleMatchLiveDetail(
@@ -377,7 +526,7 @@ class RugbyCascadeClient {
         matches: List<RugbyMatch>,
         timeoutMs: Long,
         forcePreMatchId: String? = null
-    ): List<RugbyMatch> {
+    ): List<RugbyMatch> = coroutineScope {
         val api = buildApi(timeoutMs.coerceIn(4000L, 14000L))
         val nowMs = System.currentTimeMillis()
         val ordered = mutableListOf<RugbyMatch>()
@@ -405,23 +554,22 @@ class RugbyCascadeClient {
                 (it.events.isEmpty() || it.refereeName.isBlank())
         }, 8)
 
-        if (ordered.isEmpty()) return matches
-        val updatedById = mutableMapOf<String, RugbyMatch>()
-        for (m in ordered) {
-            val enriched = runCatching { enrichSingleMatchWithApi(api, m) }.getOrNull()
-            if (enriched != null && enriched != m) {
-                updatedById[m.id] = enriched
+        if (ordered.isEmpty()) return@coroutineScope matches
+        val enrichedPairs = ordered.map { m ->
+            async {
+                val enriched = runCatching { enrichSingleMatchWithApi(api, m) }.getOrNull()
+                if (enriched != null && enriched != m) m.id to enriched else null
             }
-        }
-        if (updatedById.isEmpty()) return matches
-        return matches.map { updatedById[it.id] ?: it }
+        }.awaitAll().filterNotNull().toMap()
+        if (enrichedPairs.isEmpty()) return@coroutineScope matches
+        matches.map { enrichedPairs[it.id] ?: it }
     }
 
     suspend fun enrichMatchesWithWeather(
         matches: List<RugbyMatch>,
         timeoutMs: Long,
         bypassCacheForMatchId: String? = null
-    ): List<RugbyMatch> {
+    ): List<RugbyMatch> = coroutineScope {
         val api = buildApi(timeoutMs.coerceIn(3500L, 12000L))
         val nowMs = System.currentTimeMillis()
         val targets = matches.filter {
@@ -430,36 +578,36 @@ class RugbyCascadeClient {
                 PreMatchWindowUseCase.isInsideThirtyMinuteWindow(it, nowMs) ||
                 (it.status == MatchStatus.SCHEDULED && (it.isArgentina || it.timestampSec * 1000L - nowMs in -3600_000L..86_400_000L))
         }.take(12)
-        if (targets.isEmpty()) return matches
+        if (targets.isEmpty()) return@coroutineScope matches
 
-        val weatherByMatchId = mutableMapOf<String, MatchWeather>()
-        for (m in targets) {
-            val cityOrVenue = m.venueCity.ifBlank { m.venueName }
-            if (cityOrVenue.isBlank()) continue
-            val dayPart = RugbyDateUtils.inferDayPart(m.timestampSec, m.timeArg)
-            val cacheKey = "${cityOrVenue.lowercase()}_${dayPart.name}"
-            val forceFresh = m.id == bypassCacheForMatchId || PreMatchWindowUseCase.isInsideThirtyMinuteWindow(m, nowMs)
-            val cached = weatherCache[cacheKey]
-            if (!forceFresh && cached != null && (nowMs - cached.first) < 12 * 60_000L) {
-                weatherByMatchId[m.id] = cached.second
-                continue
+        val weatherByMatchId = targets.map { m ->
+            async {
+                val cityOrVenue = m.venueCity.ifBlank { m.venueName }
+                if (cityOrVenue.isBlank()) return@async null
+                val dayPart = RugbyDateUtils.inferDayPart(m.timestampSec, m.timeArg)
+                val cacheKey = "${cityOrVenue.lowercase()}_${dayPart.name}"
+                val forceFresh = m.id == bypassCacheForMatchId || PreMatchWindowUseCase.isInsideThirtyMinuteWindow(m, nowMs)
+                val cached = weatherCache[cacheKey]
+                if (!forceFresh && cached != null && (nowMs - cached.first) < 12 * 60_000L) {
+                    return@async m.id to cached.second
+                }
+                val coords = resolveVenueCoords(api, m.venueCity, m.venueName) ?: return@async null
+                val url = "https://api.open-meteo.com/v1/forecast" +
+                    "?latitude=${coords.first}&longitude=${coords.second}" +
+                    "&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m" +
+                    "&hourly=precipitation_probability" +
+                    "&forecast_days=2&timezone=auto"
+                val (raw, _) = fetchWithBackoffAndRotation(api, listOf(url), maxAttemptsPerUrl = 1)
+                val parsed = raw?.let { parseOpenMeteoForecast(it, dayPart) }
+                if (parsed != null && parsed.isAvailable) {
+                    weatherCache[cacheKey] = nowMs to parsed
+                    m.id to parsed
+                } else null
             }
+        }.awaitAll().filterNotNull().toMap()
 
-            val coords = resolveVenueCoords(api, m.venueCity, m.venueName) ?: continue
-            val url = "https://api.open-meteo.com/v1/forecast" +
-                "?latitude=${coords.first}&longitude=${coords.second}" +
-                "&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m" +
-                "&hourly=precipitation_probability" +
-                "&forecast_days=2&timezone=auto"
-            val (raw, _) = fetchWithBackoffAndRotation(api, listOf(url), maxAttemptsPerUrl = 1)
-            val parsed = raw?.let { parseOpenMeteoForecast(it, dayPart) }
-            if (parsed != null && parsed.isAvailable) {
-                weatherCache[cacheKey] = nowMs to parsed
-                weatherByMatchId[m.id] = parsed
-            }
-        }
-        if (weatherByMatchId.isEmpty()) return matches
-        return matches.map { m ->
+        if (weatherByMatchId.isEmpty()) return@coroutineScope matches
+        matches.map { m ->
             weatherByMatchId[m.id]?.let { w -> m.copy(weather = w) } ?: m
         }
     }
@@ -488,6 +636,19 @@ class RugbyCascadeClient {
     }
 
     companion object {
+        private val SECONDARY_LEAGUES = listOf(
+            "289234" to "Internacionales",
+            "24400" to "Nations Championship",
+            "270557" to "Six Nations",
+            "242041" to "Rugby Championship",
+            "270559" to "Top 14",
+            "267979" to "URC",
+            "270555" to "Premiership Rugby",
+            "272073" to "Champions Cup",
+            "282" to "Sevens Masculino",
+            "283" to "Sevens Femenino"
+        )
+
         private val KNOWN_RUGBY_COORDS = mapOf(
             "buenos aires" to (-34.6037 to -58.3816),
             "san isidro" to (-34.4718 to -58.5128),

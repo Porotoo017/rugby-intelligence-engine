@@ -613,7 +613,7 @@ fun HomeScreen(
                             text = if (todayUpcoming.isNotEmpty()) {
                                 "${todayUpcoming.size} partidos programados para hoy"
                             } else {
-                                "Seguimiento automático cada ${state.config.liveRefreshSec} s"
+                                if (live.isNotEmpty()) "Sincronización automática cada 5 s" else "Seguimiento automático cada ${state.config.liveRefreshSec} s"
                             },
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant

@@ -130,11 +130,12 @@
       const now = Date.now();
       const start = new Date(now - 2 * 86400000).toISOString().slice(0, 10);
       const end = new Date(now + 7 * 86400000).toISOString().slice(0, 10);
+      const cb = `&_t=${Date.now()}`;
       const [wrRes, espnRes, newsEsRes, newsEnRes] = await Promise.all([
-        fetch(`https://api.wr-rims-prod.pulselive.com/rugby/v3/match?startDate=${start}&endDate=${end}&pageSize=100&sort=asc`).then(r => r.ok ? r.json() : null).catch(() => null),
-        fetch('https://site.api.espn.com/apis/site/v2/sports/rugby/scorepanel').then(r => r.ok ? r.json() : null).catch(() => null),
-        fetch('https://api.wr-rims-prod.pulselive.com/content/worldrugby/text/es?pageSize=20').then(r => r.ok ? r.json() : null).catch(() => null),
-        fetch('https://api.wr-rims-prod.pulselive.com/content/worldrugby/text/en?pageSize=20').then(r => r.ok ? r.json() : null).catch(() => null)
+        fetch(`https://api.wr-rims-prod.pulselive.com/rugby/v3/match?startDate=${start}&endDate=${end}&pageSize=100&sort=asc${cb}`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch(`https://site.api.espn.com/apis/site/v2/sports/rugby/scorepanel?_t=${Date.now()}`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch(`https://api.wr-rims-prod.pulselive.com/content/worldrugby/text/es?pageSize=20&_t=${Date.now()}`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch(`https://api.wr-rims-prod.pulselive.com/content/worldrugby/text/en?pageSize=20&_t=${Date.now()}`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null)
       ]);
       const fmtDate = (ms) => {
         if (!ms) return { dateArg: '', dayArg: '', timeArg: '' };
@@ -172,8 +173,13 @@
           const is7s = ['mrs', 'wrs'].includes(sport) || /sevens|svns|7s/i.test(evLabel + ' ' + tms[0].name);
           const tm = fmtDate(millis);
           const sc = m.scores || [];
-          const clk = (m.clock && m.clock.label) || '';
+          const clkLabel = (m.clock && m.clock.label) || '';
+          const clkSecs = (m.clock && typeof m.clock.secs === 'number') ? m.clock.secs : null;
+          const isHt = stRaw === 'LHT' || stRaw === 'HT';
+          const clkRun = st === 'live' && !isHt && ['L1', 'L2', 'LET', 'L1ET', 'L2ET'].includes(stRaw);
           const pMap = { L1: '1er Tiempo', L2: '2do Tiempo', LHT: 'Entretiempo', LET: 'Tiempo extra' };
+          const fmtClk = (s) => `${String(Math.floor(Math.max(0, s) / 60)).padStart(2, '0')}:${String(Math.max(0, s) % 60).padStart(2, '0')}`;
+          const clkText = st === 'live' ? (isHt ? 'Entretiempo' : (clkSecs !== null ? fmtClk(clkSecs) : clkLabel)) : '';
           wrLive.push({
             id: `wr:${m.matchId}`,
             source: 'wr',
@@ -181,11 +187,15 @@
             leagueId: sport || 'wr',
             leagueName: evLabel,
             leagueShort: evLabel.replace("Men's Sevens Series 2027", 'SVNS 7s M').replace("Women's Sevens Series 2027", 'SVNS 7s F'),
-            phase: String(m.eventPhase || '').replace(/Pool\s+Pool/g, 'Pool').trim(),
+            phase: String(m.eventPhase || '').replace(/Pool\s+Pool/g, 'Pool').trim(),
             group: is7s ? 'sevens' : 'nations',
             category: 'Selecciones',
             status: st,
-            statusText: st === 'live' ? `${pMap[stRaw] || 'EN VIVO'}${clk ? ' · ' + clk : ''}` : (st === 'finished' ? 'Finalizado' : 'Programado'),
+            periodLabel: pMap[stRaw] || (st === 'live' ? 'EN VIVO' : (st === 'finished' ? 'Finalizado' : 'Programado')),
+            clockSecs: st === 'live' ? clkSecs : null,
+            clockSyncedAt: Date.now(),
+            clockRunning: clkRun,
+            statusText: st === 'live' ? (isHt ? 'Entretiempo' : `${pMap[stRaw] || 'EN VIVO'}${clkText ? ' · ' + clkText : ''}`) : (st === 'finished' ? 'Finalizado' : 'Programado'),
             isArgentina: /argentina/i.test(tms[0].name + ' ' + tms[1].name),
             venue: m.venue || {},
             ts: Math.floor(millis / 1000),
@@ -199,19 +209,58 @@
       const existing = state.data.matches || [];
       const bySig = new Map();
       for (const m of existing) bySig.set(sig(m), m);
+      // Consultar /summary en paralelo para partidos LIVE para obtener reloj oficial exacto
+      const liveWrSubset = wrLive.filter(x => x.status === 'live').slice(0, 8);
+      if (liveWrSubset.length) {
+        await Promise.all(liveWrSubset.map(async (lm) => {
+          try {
+            const sm = await fetch(`https://api.wr-rims-prod.pulselive.com/rugby/v3/match/${lm.eventId}/summary?_t=${Date.now()}`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null);
+            if (sm && sm.match) {
+              const smM = sm.match;
+              const smRaw = String(smM.status || '').toUpperCase();
+              const smIsHt = smRaw === 'LHT' || smRaw === 'HT';
+              const smClkSecs = (smM.clock && typeof smM.clock.secs === 'number') ? smM.clock.secs : null;
+              if (smClkSecs !== null) {
+                lm.clockSecs = smClkSecs;
+                lm.clockSyncedAt = Date.now();
+                lm.clockRunning = !smIsHt && ['L1', 'L2', 'LET', 'L1ET', 'L2ET'].includes(smRaw);
+                const mmss = `${String(Math.floor(Math.max(0, smClkSecs) / 60)).padStart(2, '0')}:${String(Math.max(0, smClkSecs) % 60).padStart(2, '0')}`;
+                const pMap2 = { L1: '1er Tiempo', L2: '2do Tiempo', LHT: 'Entretiempo', LET: 'Tiempo extra' };
+                lm.periodLabel = pMap2[smRaw] || lm.periodLabel;
+                lm.statusText = smIsHt ? 'Entretiempo' : `${lm.periodLabel} · ${mmss}`;
+              }
+              if (Array.isArray(smM.scores) && smM.scores.length >= 2) {
+                const curTot = (lm.home.score ?? -1) + (lm.away.score ?? -1);
+                const smTot = (smM.scores[0] ?? -1) + (smM.scores[1] ?? -1);
+                if (smRaw === 'C' || smRaw === 'FT' || smRaw === 'LFT' || smTot >= curTot) {
+                  lm.home.score = smM.scores[0];
+                  lm.away.score = smM.scores[1];
+                }
+              }
+            }
+          } catch (_) {}
+        }));
+      }
       for (const liveM of wrLive) {
         const s = sig(liveM);
         const prev = bySig.get(s);
         if (prev) {
+          const prevTot = (prev.home.score ?? -1) + (prev.away.score ?? -1);
+          const newTot = (liveM.home.score ?? -1) + (liveM.away.score ?? -1);
+          const keepNew = liveM.status === 'finished' || prev.status !== 'live' || (liveM.home.score != null && newTot >= prevTot);
           bySig.set(s, {
             ...prev,
             id: prev.id || liveM.id,
             eventId: liveM.eventId || prev.eventId,
             source: liveM.source || prev.source,
             status: liveM.status,
+            periodLabel: liveM.periodLabel || prev.periodLabel,
+            clockSecs: liveM.clockSecs ?? prev.clockSecs,
+            clockSyncedAt: liveM.clockSyncedAt || prev.clockSyncedAt,
+            clockRunning: liveM.clockRunning,
             statusText: liveM.statusText,
-            home: { ...prev.home, score: liveM.home.score ?? prev.home.score },
-            away: { ...prev.away, score: liveM.away.score ?? prev.away.score }
+            home: { ...prev.home, score: keepNew ? (liveM.home.score ?? prev.home.score) : prev.home.score },
+            away: { ...prev.away, score: keepNew ? (liveM.away.score ?? prev.away.score) : prev.away.score }
           });
         } else {
           bySig.set(s, liveM);
@@ -267,8 +316,8 @@
     try {
       const base = `https://api.wr-rims-prod.pulselive.com/rugby/v3/match/${m.eventId}`;
       const [sm, tl] = await Promise.all([
-        fetch(`${base}/summary`).then(r => r.ok ? r.json() : null).catch(() => null),
-        fetch(`${base}/timeline`).then(r => r.ok ? r.json() : null).catch(() => null)
+        fetch(`${base}/summary?_t=${Date.now()}`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch(`${base}/timeline?_t=${Date.now()}`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null)
       ]);
       const pMap = {};
       if (sm) {
@@ -366,6 +415,17 @@
     render();
   }
 
+  function computeLiveLabel(m) {
+    if (!m || m.status !== 'live') return '';
+    if (m.clockRunning && typeof m.clockSecs === 'number') {
+      const elapsed = Math.min(180, Math.max(0, Math.floor((Date.now() - (m.clockSyncedAt || Date.now())) / 1000)));
+      const tot = m.clockSecs + elapsed;
+      const mmss = `${String(Math.floor(tot / 60)).padStart(2, '0')}:${String(tot % 60).padStart(2, '0')}`;
+      return `${m.periodLabel || 'EN VIVO'} · ${mmss}`;
+    }
+    return m.statusText || m.periodLabel || 'EN VIVO';
+  }
+
   function renderMatchCard(m) {
     const isLive = m.status === 'live';
     const isArg = Boolean(m.isArgentina);
@@ -394,7 +454,7 @@
       <button class="match-card ${isLive ? 'is-live' : ''} ${isArg ? 'is-arg' : ''}" data-match-id="${esc(m.id)}" type="button">
         <div class="card-kicker">
           <span class="kicker-league">${esc(leagueTitle)}</span>
-          <span class="kicker-state ${stateClass}">${esc(formatStatusLabel(m))}</span>
+          <span class="kicker-state ${stateClass}" ${isLive ? `data-live-clock="${esc(m.id)}"` : ''}>${esc(computeLiveLabel(m) || formatStatusLabel(m))}</span>
         </div>
         <div class="board-rows">
           <div class="board-row">
@@ -1341,7 +1401,7 @@
       ? `${m.home.score} — ${m.away.score}`
       : (m.timeArg && m.timeArg !== '00:00' ? m.timeArg : 'Programado');
     const scoreSub = hasScores
-      ? (m.status === 'live' ? (m.statusText || 'EN VIVO') : (m.statusText || 'Finalizado'))
+      ? (m.status === 'live' ? (computeLiveLabel(m) || m.statusText || 'EN VIVO') : (m.statusText || 'Finalizado'))
       : (m.dayArg || '');
 
     const hCoach = cleanCoach(m.home.coach);
@@ -1725,5 +1785,24 @@
   }
 
   loadData(false);
-  setInterval(() => { overlayLiveFeeds(); }, 20000);
+  let livePollCounter = 0;
+  setInterval(() => {
+    livePollCounter++;
+    const hasLive = Boolean(state.data && state.data.statusCounts && state.data.statusCounts.live > 0);
+    if (hasLive || livePollCounter % 3 === 0) {
+      overlayLiveFeeds();
+    }
+  }, 8000);
+  setInterval(() => {
+    const nodes = document.querySelectorAll('[data-live-clock]');
+    if (!nodes.length || !state.data || !Array.isArray(state.data.matches)) return;
+    nodes.forEach((el) => {
+      const id = el.getAttribute('data-live-clock');
+      const m = state.data.matches.find(x => x.id === id);
+      if (m && m.status === 'live') {
+        const lbl = computeLiveLabel(m);
+        if (lbl) el.textContent = lbl;
+      }
+    });
+  }, 1000);
 })();

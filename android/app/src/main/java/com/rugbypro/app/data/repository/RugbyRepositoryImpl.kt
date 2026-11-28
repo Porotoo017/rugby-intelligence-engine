@@ -181,6 +181,35 @@ class RugbyRepositoryImpl(
         )
     }
 
+    override suspend fun syncLivePulseOnly(currentDashboard: RugbyDashboard?): RugbyDashboard = withContext(Dispatchers.IO) {
+        if (currentDashboard == null) {
+            return@withContext syncWithCascade(forceLiveRefresh = false, forcePreMatchId = null)
+        }
+        val cfg = dao.getConfigEntity()?.toDomain() ?: AppConfig()
+        val pulse = cascade.executeFastLivePulse(currentDashboard.matches, cfg.apiTimeoutMs)
+        val anyHealthy = pulse.healthItems.any { it.isHealthy }
+        if (!anyHealthy) {
+            return@withContext currentDashboard
+        }
+        val step1 = CrossVerifyMatchesUseCase.execute(
+            primary = currentDashboard.matches,
+            secondary = pulse.worldRugbyMatches,
+            fromLocalCacheOnly = false
+        )
+        val mergedMatches = CrossVerifyMatchesUseCase.execute(
+            primary = step1,
+            secondary = pulse.secondaryLiveMatches,
+            fromLocalCacheOnly = false
+        )
+        val withKits = RugbyJsonParser.attachTeamKitsToMatches(mergedMatches, currentDashboard.teams)
+        val uniqueMatches = withKits.distinctBy { it.id.ifBlank { "${it.homeName}_${it.awayName}_${it.timestampSec}" } }
+        currentDashboard.copy(
+            matches = uniqueMatches,
+            sourcesHealth = emptyList(),
+            isOfflineFallback = false
+        )
+    }
+
     override suspend fun refreshMatchDetail(match: RugbyMatch): RugbyMatch = withContext(Dispatchers.IO) {
         val cfg = dao.getConfigEntity()?.toDomain() ?: AppConfig()
         val (cachedPayload, _) = readLocalPayload()

@@ -958,7 +958,13 @@ fun SettingsScreen(
 
         item {
             GlassCard {
-                Text("Frecuencia en Vivo", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.secondary)
+                Text("Frecuencia de Actualización", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.secondary)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "Con partidos activos en vivo, el marcador y cronómetro sincronizan automáticamente cada 5 s.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Spacer(Modifier.height(Spacing.sm))
                 Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                     listOf(15, 30, 60).forEach { sec ->
